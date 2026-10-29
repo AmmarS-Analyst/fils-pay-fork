@@ -201,7 +201,23 @@ test("pay charges exactly the link's own amount — the request body carries no 
   assert.equal(Number(txnRow.rows[0]!.captured_fils), 9_999);
 });
 
-// only without submittedAt. with a past submittedAt it pays — that's the terminal case (FH)
+test("FP-187: a back-dated submittedAt cannot pay an expired link", async () => {
+  const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("expired-backdated");
+  const link = await createLink(rawKey, merchantId, {
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  });
+  await pool.query(`UPDATE payment_links SET expires_at = now() - interval '1 minute' WHERE token = $1`, [link.token]);
+
+  const payRes = await app.inject({
+    method: "POST",
+    url: `/v1/payment-links/${link.token}/pay`,
+    headers: { "idempotency-key": randomUUID() },
+    payload: { card: APPROVED_CARD, submittedAt: "2020-01-01T00:00:00.000Z" },
+  });
+  assert.equal(payRes.statusCode, 410, payRes.body);
+  assert.equal(payRes.json().error, "payment_link_expired");
+});
+
 test("expired link is rejected: read reports 'expired', pay is rejected 410", async () => {
   const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("expired");
   const link = await createLink(rawKey, merchantId, {
