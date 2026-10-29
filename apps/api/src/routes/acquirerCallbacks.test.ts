@@ -135,6 +135,23 @@ test("POST /v1/acquirer/callbacks rejects a callback sent without a signature he
   assert.equal(await noteCount(callbackId), "0");
 });
 
+test("FP-201: the same callback delivered twice records one note", async () => {
+  const transactionId = await createTransaction();
+  const callbackId = `acqcb_${randomUUID()}`;
+  const body = callbackBody(transactionId, callbackId);
+
+  for (let i = 0; i < 2; i++) {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/acquirer/callbacks",
+      headers: { "acquirer-callback-signature": signatureHeader(body) },
+      payload: body,
+    });
+    assert.equal(res.statusCode, 200, res.body);
+  }
+  assert.equal(await noteCount(callbackId), "1");
+});
+
 test("POST /v1/acquirer/callbacks rejects a replayed (stale) signed callback", async () => {
   const transactionId = await createTransaction();
   const callbackId = `acqcb_${randomUUID()}`;
