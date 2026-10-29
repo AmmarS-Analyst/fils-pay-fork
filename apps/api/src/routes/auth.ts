@@ -132,44 +132,42 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         throw new UnauthorizedError("no_pending_session");
       }
 
-      const challengeResult = await app.db.query<{
-        id: string;
-        code_salt: string;
-        code_hash: string;
-        attempt_count: number;
-        max_attempts: number;
-        expires_at: Date;
-        consumed_at: Date | null;
-      }>(
-        `SELECT id, code_salt, code_hash, attempt_count, max_attempts, expires_at, consumed_at
-           FROM otp_challenges WHERE id = $1`,
+      // Reserve one attempt atomically before comparing. The old
+      // check-then-increment let N parallel guesses all read
+      // attempt_count = 0 and bypass max_attempts.
+      const challengeResult = await app.db.query<{ id: string; code_salt: string; code_hash: string }>(
+        `UPDATE otp_challenges SET attempt_count = attempt_count + 1
+          WHERE id = $1 AND consumed_at IS NULL AND expires_at > now() AND attempt_count < max_attempts
+          RETURNING id, code_salt, code_hash`,
         [pending.otpChallengeId],
       );
       const challenge = challengeResult.rows[0];
-      if (!challenge || challenge.consumed_at !== null) {
-        throw new GoneError("otp_expired");
-      }
-      if (challenge.expires_at.getTime() <= Date.now()) {
-        throw new GoneError("otp_expired");
-      }
-
-      // am: check-then-increment is fine, max_attempts=5 so worst case is 5 guesses
-      // MK: 5 guesses per parallel batch? if i fire 50 at once they all read attempt_count=0
-      if (challenge.attempt_count >= challenge.max_attempts) {
+      if (!challenge) {
+        const state = await app.db.query<{ consumed_at: Date | null; expires_at: Date }>(
+          `SELECT consumed_at, expires_at FROM otp_challenges WHERE id = $1`,
+          [pending.otpChallengeId],
+        );
+        const row = state.rows[0];
+        if (!row || row.consumed_at !== null || row.expires_at.getTime() <= Date.now()) {
+          throw new GoneError("otp_expired");
+        }
         await revokeSession(app.db, pending.sessionId);
         throw new TooManyRequestsError("too_many_attempts");
       }
 
       const matches = verifyOtpCode(code, challenge.code_salt, challenge.code_hash);
       if (!matches) {
-        await app.db.query(`UPDATE otp_challenges SET attempt_count = attempt_count + 1 WHERE id = $1`, [
-          challenge.id,
-        ]);
         throw new UnauthorizedError("invalid_code");
       }
 
       const merchantUserResult = await withTransaction(app.db, async (client) => {
-        await client.query(`UPDATE otp_challenges SET consumed_at = now() WHERE id = $1`, [challenge.id]);
+        const consumed = await client.query(
+          `UPDATE otp_challenges SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL`,
+          [challenge.id],
+        );
+        if (consumed.rowCount !== 1) {
+          throw new GoneError("otp_expired");
+        }
         // promoteSession bumps expires_at to 12h server-side; the cookie maxAge doesn't matter because
         // MK: admin verify re-sets the cookie after this, merchant verify doesnt. related to the 10 min logouts?
         await promoteSession(client, pending.sessionId, app.config.sessionTtlHours);
