@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { timingSafeEqualHex } from "../lib/crypto.js";
 
 /** Verifies the signature on an inbound acquirer callback. */
 
@@ -29,41 +30,45 @@ function parseAcquirerSignatureHeader(header: string): ParsedAcquirerSignatureHe
   return { timestamp, signature };
 }
 
-/** There is no timestamp reason: freshness is not checked for inbound callbacks. */
-export type VerifyAcquirerCallbackFailureReason = "malformed_header" | "signature_mismatch";
+export type VerifyAcquirerCallbackFailureReason =
+  | "missing_signature"
+  | "malformed_header"
+  | "signature_mismatch"
+  | "timestamp_out_of_tolerance";
 
 export interface VerifyAcquirerCallbackResult {
   valid: boolean;
   reason?: VerifyAcquirerCallbackFailureReason;
 }
 
-function constantTimeEquals(a: string, b: string): boolean {
-  return Buffer.from(a).length === Buffer.from(b).length &&
-    Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
-}
+/** A signed callback older or newer than this is a replay, not a delivery. */
+export const ACQUIRER_CALLBACK_TOLERANCE_SECONDS = 300;
 
-/** Verifies the acquirer callback signature when present and required. */
+/**
+ * Verifies `t=<unix>,v1=<hex hmac-sha256 of "t.rawBody">`. The signature is
+ * required by default, must be fresh (5 min) and is compared in constant time.
+ */
 export function verifyAcquirerCallbackSignature(
-  payload: unknown,
+  rawBody: string,
   header: string | undefined,
   secret: string,
-  requireSignature = false,
+  requireSignature = true,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
 ): VerifyAcquirerCallbackResult {
   if (!header) {
-    return requireSignature
-      ? { valid: false, reason: "malformed_header" }
-      : { valid: true };
+    return requireSignature ? { valid: false, reason: "missing_signature" } : { valid: true };
   }
 
   const parsed = parseAcquirerSignatureHeader(header);
   if (!parsed) return { valid: false, reason: "malformed_header" };
 
-  const expected = createHmac("sha256", secret)
-    .update(`${parsed.timestamp}.${JSON.stringify(payload)}`)
-    .digest("hex");
-
-  if (!constantTimeEquals(expected, parsed.signature)) {
+  const expected = createHmac("sha256", secret).update(`${parsed.timestamp}.${rawBody}`).digest("hex");
+  if (!timingSafeEqualHex(expected, parsed.signature)) {
     return { valid: false, reason: "signature_mismatch" };
+  }
+
+  if (Math.abs(nowSeconds - parsed.timestamp) > ACQUIRER_CALLBACK_TOLERANCE_SECONDS) {
+    return { valid: false, reason: "timestamp_out_of_tolerance" };
   }
 
   return { valid: true };
