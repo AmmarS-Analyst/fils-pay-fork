@@ -28,6 +28,11 @@ export interface SignedPayload {
  * the header — a captured genuine delivery can't be replayed by a third
  * party at an arbitrary later time with a signature that still looks fresh.
  */
+/** The body a delivery sends: the exact bytes the signature covers (FP-240). */
+export function serializeWebhookBody(payload: unknown): string {
+  return canonicalJson(payload);
+}
+
 export function signPayload(
   payload: unknown,
   secret: string,

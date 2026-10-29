@@ -79,3 +79,14 @@ test("verifySignature uses timingSafeEqualHex, not ===: a same-length wrong sign
   assert.equal(result.valid, false);
   assert.equal(result.reason, "signature_mismatch");
 });
+
+test("FP-240: a receiver verifying the raw body bytes (HMAC of `t.body`) accepts what we send", async () => {
+  const { createHmac } = await import("node:crypto");
+  const { serializeWebhookBody } = await import("./sign.js");
+  // Key order as Postgres jsonb returns it, which differs from sorted order.
+  const payload = { type: "transaction.captured", id: "evt_1", data: { amountFils: 4750, merchantId: "m" } };
+  const { timestamp, signature } = signPayload(payload, SECRET);
+  const rawBody = serializeWebhookBody(payload);
+  const expected = createHmac("sha256", SECRET).update(`${timestamp}.${rawBody}`).digest("hex");
+  assert.equal(signature, `t=${timestamp},v1=${expected}`);
+});
