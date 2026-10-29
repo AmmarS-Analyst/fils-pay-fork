@@ -1,11 +1,11 @@
-import { toFils, type Fils } from "@filspay/money";
+import { parseBhdToFils, type Fils } from "@filspay/money";
 import { BadRequestError } from "../lib/errors.js";
-import { parseDecimalMinor } from "../lib/decimal.js";
 
-/** Parses one CSV row's amount column into fils. */
+/** Parses one CSV row's BD amount column into fils (1 BD = 1000 fils, ADR-0001).
+ *  parseDecimalMinor defaulted to 2 decimals, so "4.75" became 475 fils, 10x too small. */
 export function parseAdjustmentAmountFils(raw: string): Fils {
   try {
-    return toFils(parseDecimalMinor(raw), { allowNegative: true });
+    return parseBhdToFils(raw);
   } catch {
     throw new BadRequestError("invalid_amount", `could not parse amount "${raw}"`);
   }
