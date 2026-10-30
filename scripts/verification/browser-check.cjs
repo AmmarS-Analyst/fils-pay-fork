@@ -50,14 +50,14 @@ if (!process.env.DATABASE_URL?.includes('filspay_browser')) throw new Error('Use
     await check('merchant password + OTP login and pending-session rejection',()=>login(merchant,false,'owner@alpharetail.example','FilsPaySeed!2026',merchantId));
     await shot(merchant,'merchant-transactions-desktop');
     for(const [label,route] of [['Payment links','payment-links'],['Webhooks','webhooks'],['Settlement','settlement'],['Reconciliation','reconciliation'],['Overview','overview'],['Transactions','transactions']]) {
-      await check(`merchant navigation: ${label}`,async()=>{await merchant.getByRole('link',{name:label,exact:true}).first().click();await merchant.waitForURL(`${web}/dashboard/${route}`);await merchant.locator('h1').waitFor();});
+      await check(`merchant navigation: ${label}`,async()=>{await merchant.getByRole('link',{name:label,exact:true}).first().click();await merchant.waitForURL(`${web}/dashboard/${route}`);await merchant.locator('h1').waitFor();await merchant.waitForTimeout(200);await shot(merchant,`merchant-${route}-desktop`);await merchant.setViewportSize({width:390,height:844});await shot(merchant,`merchant-${route}-mobile`);await merchant.setViewportSize({width:1440,height:1000});});
     }
     await merchant.setViewportSize({width:390,height:844});
     await shot(merchant,'merchant-transactions-mobile');
     await merchant.setViewportSize({width:1440,height:1000});
     let checkoutUrl;
     await check('create payment link through merchant browser form',async()=>{
-      await merchant.goto(`${web}/dashboard/payment-links/new`);
+      await merchant.goto(`${web}/dashboard/payment-links/new`);await shot(merchant,'merchant-create-link-desktop');
       await merchant.getByLabel('Amount in fils',{exact:true}).fill('1000');
       await merchant.getByLabel('Reference (optional)',{exact:true}).fill(`browser-audit-${Date.now()}`);
       await merchant.getByLabel('Description (optional)',{exact:true}).fill('Local verification payment');
@@ -73,8 +73,8 @@ if (!process.env.DATABASE_URL?.includes('filspay_browser')) throw new Error('Use
     await check('public checkout charges a simulated card and shows success',async()=>{
       await buyer.goto(checkoutUrl);
       await buyer.getByLabel('Card number',{exact:true}).fill('4111111111111111');
-      await buyer.getByLabel('Expiry month',{exact:true}).fill('12');
-      await buyer.getByLabel('Expiry year',{exact:true}).fill('2099');
+      await buyer.getByLabel('Month',{exact:true}).fill('12');
+      await buyer.getByLabel('Year',{exact:true}).fill('2099');
       await buyer.getByLabel(/CVV|Security code/i).fill('123');
       await shot(buyer,'checkout-mobile');
       const payResponse = buyer.waitForResponse(r=>r.url().includes('/payment-links/')&&r.url().endsWith('/pay')&&r.request().method()==='POST');
@@ -109,11 +109,12 @@ if (!process.env.DATABASE_URL?.includes('filspay_browser')) throw new Error('Use
     await check('admin password + OTP login and pending-session rejection',()=>login(admin,true,'superadmin@filspay.test','FilsPayAdminSeed!2026'));
     await shot(admin,'admin-merchants-desktop');
     for(const [label,route] of [['Credits','credits'],['Settlement ops','settlement'],['Import adjustments','adjustment-imports'],['Webhook replay','webhooks'],['Merchants','merchants']]) {
-      await check(`admin navigation: ${label}`,async()=>{await admin.getByRole('link',{name:label,exact:true}).click();await admin.waitForURL(`${adminOrigin}/${route}`);await admin.locator('h1').waitFor();});
+      await check(`admin navigation: ${label}`,async()=>{await admin.getByRole('link',{name:label,exact:true}).click();await admin.waitForURL(`${adminOrigin}/${route}`);await admin.locator('h1').waitFor();await admin.waitForTimeout(200);await shot(admin,`admin-${route}-desktop`);await admin.setViewportSize({width:390,height:844});await shot(admin,`admin-${route}-mobile`);await admin.setViewportSize({width:1440,height:1000});});
     }
     await admin.setViewportSize({width:390,height:844});await shot(admin,'admin-merchants-mobile');
     await check('merchant logout revokes the session',async()=>{await merchant.getByRole('button',{name:'Log out',exact:true}).click();await merchant.waitForURL(`${web}/dashboard/login`);assert.equal((await merchantContext.request.get(`${api}/v1/auth/me`)).status(),401);});
     await check('admin logout revokes the session',async()=>{await admin.getByRole('button',{name:'Log out',exact:true}).click();await admin.waitForURL(`${adminOrigin}/login`);assert.equal((await adminContext.request.get(`${api}/v1/admin/auth/me`)).status(),401);});
+    assert.deepEqual(results.overflow,[],'no page may overflow the viewport');
     assert.deepEqual(results.errors,[],'browser must have no uncaught exceptions');
     assert.deepEqual(results.serverErrors,[],'browser flows must have no 5xx responses');
   } finally {

@@ -1,0 +1,11 @@
+{
+  "kind": "UI fixtures only; no endpoint registered and no delivery sent",
+  "checks": [
+    "webhook detail three widths",
+    "long URL and expanded response containment",
+    "delivery filter query unchanged",
+    "keyboard skip to content",
+    "four checkout terminal states"
+  ],
+  "errors": []
+}

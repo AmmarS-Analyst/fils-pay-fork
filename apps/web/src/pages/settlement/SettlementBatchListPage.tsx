@@ -93,41 +93,43 @@ export function SettlementBatchListPage() {
 
       {error ? <p className="dash-error">{error}</p> : null}
 
-      <table className="dash-table">
-        <thead>
-          <tr>
-            <th>Batch date</th>
-            <th>Status</th>
-            <th>Gross</th>
-            <th>Fee</th>
-            <th>Net payout</th>
-            <th>Closed</th>
-            <th>Paid</th>
-          </tr>
-        </thead>
-        <tbody>
-          {batches.map((batch) => (
-            <tr key={batch.id}>
-              <td>
-                <Link to={`/dashboard/settlement/${batch.id}`}>{batch.batchDate}</Link>
-              </td>
-              <td>
-                <span className={`dash-status dash-status-${batch.status}`}>{batch.status}</span>
-              </td>
-              <td>{bhd(batch.grossFils)}</td>
-              <td>{bhd(batch.feeFils)}</td>
-              <td>{bhd(batch.netPayoutFils)}</td>
-              <td>{dateTime(batch.closedAt)}</td>
-              <td>{dateTime(batch.paidAt)}</td>
-            </tr>
-          ))}
-          {batches.length === 0 && !loading ? (
+      <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
+        <table className="dash-table">
+          <thead>
             <tr>
-              <td colSpan={7}>No settlement batches match these filters.</td>
+              <th>Batch date</th>
+              <th>Status</th>
+              <th className="dash-num">Gross</th>
+              <th className="dash-num">Fee</th>
+              <th className="dash-num">Net payout</th>
+              <th>Closed</th>
+              <th>Paid</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {batches.map((batch) => (
+              <tr key={batch.id}>
+                <td>
+                  <Link to={`/dashboard/settlement/${batch.id}`}>{batch.batchDate}</Link>
+                </td>
+                <td>
+                  <span className={`dash-status dash-status-${batch.status}`}>{batch.status}</span>
+                </td>
+                <td className="dash-num">{bhd(batch.grossFils)}</td>
+                <td className="dash-num">{bhd(batch.feeFils)}</td>
+                <td className="dash-num">{bhd(batch.netPayoutFils)}</td>
+                <td>{dateTime(batch.closedAt)}</td>
+                <td>{dateTime(batch.paidAt)}</td>
+              </tr>
+            ))}
+            {batches.length === 0 && !loading ? (
+              <tr>
+                <td colSpan={7}>No settlement batches match these filters.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
 
       {loading ? <p>Loading...</p> : null}
 

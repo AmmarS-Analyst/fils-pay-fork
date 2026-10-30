@@ -21,6 +21,15 @@ type PayState =
 
 const EMPTY_CARD: SimulatedCardInput = { pan: "", expiryMonth: 1, expiryYear: new Date().getFullYear() + 1, cvv: "" };
 
+function CheckoutBrand() {
+  return (
+    <div className="checkout-brand" aria-label="FilsPay">
+      <span className="checkout-brand-mark" aria-hidden="true" />
+      <span>FilsPay</span>
+    </div>
+  );
+}
+
 export function CheckoutPage() {
   const { token } = useParams<{ token: string }>();
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
@@ -91,6 +100,7 @@ export function CheckoutPage() {
   if (loadState.kind === "loading") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <p role="status">Loading...</p>
       </main>
     );
@@ -99,6 +109,7 @@ export function CheckoutPage() {
   if (loadState.kind === "not_found") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <h1>Payment link not found</h1>
         <p>This payment link does not exist.</p>
       </main>
@@ -109,7 +120,13 @@ export function CheckoutPage() {
 
   if (payState.kind === "success") {
     return (
-      <main className="checkout-page" role="status">
+      <main className="checkout-page checkout-page-success" role="status">
+        <CheckoutBrand />
+        <span className="checkout-success-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m5 12 4 4L19 6" />
+          </svg>
+        </span>
         <h1>Payment successful</h1>
         <p className="checkout-amount">{formatBhd(toFils(payState.result.amountFils))} BHD</p>
         <p>Thank you, {link.merchantDisplayName} has received your payment.</p>
@@ -133,6 +150,7 @@ export function CheckoutPage() {
   if (payState.kind === "terminal") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <h1>Unable to pay</h1>
         <p>{payState.message}</p>
       </main>
@@ -142,6 +160,7 @@ export function CheckoutPage() {
   if (link.status === "paid") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <h1>Already paid</h1>
         <p>This invoice has already been paid.</p>
       </main>
@@ -150,6 +169,7 @@ export function CheckoutPage() {
   if (link.status === "expired") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <h1>Link expired</h1>
         <p>This payment link has expired.</p>
       </main>
@@ -158,6 +178,7 @@ export function CheckoutPage() {
   if (link.status === "canceled") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <h1>No longer available</h1>
         <p>This payment link is no longer available.</p>
       </main>
@@ -166,6 +187,7 @@ export function CheckoutPage() {
   if (link.status === "processing") {
     return (
       <main className="checkout-page">
+        <CheckoutBrand />
         <h1>Payment processing</h1>
         <p>A payment is being processed for this link — please wait a moment and refresh.</p>
       </main>
@@ -178,6 +200,7 @@ export function CheckoutPage() {
 
   return (
     <main className="checkout-page">
+      <CheckoutBrand />
       <h1>{link.merchantDisplayName}</h1>
       <p className="checkout-amount">{amount} BHD</p>
       {link.description ? <p className="checkout-description">{link.description}</p> : null}
@@ -189,7 +212,7 @@ export function CheckoutPage() {
         </p>
       ) : null}
 
-      <form onSubmit={handleSubmit} className="checkout-form">
+      <form onSubmit={handleSubmit} className="checkout-form" aria-busy={submitting}>
         <label>
           Card number
           <input

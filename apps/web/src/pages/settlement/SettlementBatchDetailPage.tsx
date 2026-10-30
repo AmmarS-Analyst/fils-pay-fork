@@ -87,8 +87,8 @@ export function SettlementBatchDetailPage() {
     <section>
       <h1>Settlement batch {batch.batchDate}</h1>
       {batch.status === "closed" && (
-        <div className="dash-progress-bar" style={{ width: "100%", background: "#e0e0e0", height: 6, borderRadius: 3 }}>
-          <div style={{ width: `${Math.min(displayProgress, 100)}%`, background: "#2563eb", height: 6, borderRadius: 3 }} />
+        <div className="dash-progress-bar" style={{ width: "100%", background: "var(--fp-raised)", height: 6, borderRadius: 3 }}>
+          <div style={{ width: `${Math.min(displayProgress, 100)}%`, background: "var(--fp-red)", height: 6, borderRadius: 3 }} />
         </div>
       )}
       <p className="dash-muted">
@@ -127,41 +127,43 @@ export function SettlementBatchDetailPage() {
       </dl>
 
       <h2>Included transactions</h2>
-      <table className="dash-table">
-        <thead>
-          <tr>
-            <th>Line</th>
-            <th>Transaction</th>
-            <th>Reference</th>
-            <th>Status</th>
-            <th>Authorized</th>
-            <th>Captured</th>
-            <th>Scheme amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line) => (
-            <tr key={`${line.transactionId}-${line.lineSequence}`}>
-              <td>{line.lineSequence}</td>
-              <td>
-                <Link to={`/dashboard/transactions/${line.transactionId}`}>
-                  <code>{line.transactionId}</code>
-                </Link>
-              </td>
-              <td>{dash(line.reference)}</td>
-              <td>{line.status}</td>
-              <td>{bhd(line.authorizedFils)}</td>
-              <td>{bhd(line.capturedFils)}</td>
-              <td>{bhd(line.schemeAmountFils)}</td>
-            </tr>
-          ))}
-          {lines.length === 0 ? (
+      <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
+        <table className="dash-table">
+          <thead>
             <tr>
-              <td colSpan={7}>No scheme export lines in this batch.</td>
+              <th>Line</th>
+              <th>Transaction</th>
+              <th>Reference</th>
+              <th>Status</th>
+              <th className="dash-num">Authorized</th>
+              <th className="dash-num">Captured</th>
+              <th>Scheme amount</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {lines.map((line) => (
+              <tr key={`${line.transactionId}-${line.lineSequence}`}>
+                <td>{line.lineSequence}</td>
+                <td>
+                  <Link to={`/dashboard/transactions/${line.transactionId}`}>
+                    <code>{line.transactionId}</code>
+                  </Link>
+                </td>
+                <td>{dash(line.reference)}</td>
+                <td>{line.status}</td>
+                <td className="dash-num">{bhd(line.authorizedFils)}</td>
+                <td className="dash-num">{bhd(line.capturedFils)}</td>
+                <td className="dash-num">{bhd(line.schemeAmountFils)}</td>
+              </tr>
+            ))}
+            {lines.length === 0 ? (
+              <tr>
+                <td colSpan={7}>No scheme export lines in this batch.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
       <p className="dash-muted">
         The scheme amount is the card-network export figure, quantized to two
         decimal places at that boundary — it can be up to 9 fils below the

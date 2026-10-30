@@ -27,9 +27,13 @@ export function DashboardLayout() {
 
   return (
     <div className="dash-shell">
-      <header className="dash-header">
-        <div className="dash-brand">FilsPay</div>
-        <nav className="dash-nav">
+      <a className="fp-skip-link" href="#main-content">Skip to content</a>
+      <aside className="dash-sidebar">
+        <div className="dash-brand">
+          <span className="dash-brand-mark" aria-hidden="true" />
+          <span>FilsPay</span>
+        </div>
+        <nav className="dash-nav" aria-label="Merchant dashboard">
           <NavLink to="/dashboard/transactions">Transactions</NavLink>
           <NavLink to="/dashboard/payment-links">Payment links</NavLink>
           {/* Every webhook route — including the plain list read — is
@@ -44,25 +48,34 @@ export function DashboardLayout() {
           </RequireRole>
           <NavLink to="/dashboard/overview">Overview</NavLink>
         </nav>
-        <div className="dash-identity">
-          {me ? (
-            <span>
-              {me.email} <span className="dash-role-chip">{me.role}</span>
-              <span className="dash-muted"> · {me.merchant.displayName}</span>
-            </span>
-          ) : null}
-          <button type="button" className="dash-button" onClick={() => void handleSignOut()}>
+        <div className="dash-sidebar-foot">
+          <span className="dash-sidebar-foot-dot" aria-hidden="true" />
+          Bahrain time · UTC+3
+        </div>
+      </aside>
+
+      <div className="dash-stage">
+        <header className="dash-header">
+          <div className="dash-identity">
+            {me ? (
+              <>
+                <span className="dash-identity-merchant">{me.merchant.displayName}</span>
+                <span className="dash-identity-email">{me.email}</span>
+                <span className="dash-role-chip">{me.role}</span>
+              </>
+            ) : null}
+          </div>
+          <button type="button" className="dash-button dash-signout" onClick={() => void handleSignOut()}>
             Log out
           </button>
-        </div>
-      </header>
+        </header>
 
-      {error ? <p className="dash-error">{error}</p> : null}
+        {error ? <p className="dash-error dash-global-error">{error}</p> : null}
 
-      <main className="dash-main">
-        <Outlet />
-        <p className="dash-muted">Times are shown in Bahrain time (UTC+3).</p>
-      </main>
+        <main className="dash-main" id="main-content" tabIndex={-1}>
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

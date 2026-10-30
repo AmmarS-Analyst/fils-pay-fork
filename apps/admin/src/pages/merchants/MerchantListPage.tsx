@@ -154,6 +154,7 @@ export function MerchantListPage() {
         </div>
       ) : null}
 
+      <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
       <table className="admin-table">
         <thead>
           <tr>
@@ -207,6 +208,7 @@ export function MerchantListPage() {
           ) : null}
         </tbody>
       </table>
+      </div>
 
       {loading ? <p>Loading...</p> : null}
 
