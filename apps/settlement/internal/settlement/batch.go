@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/filspay/settlement/internal/balances"
 	"github.com/filspay/settlement/internal/money"
 	"github.com/filspay/settlement/internal/splits"
 )
@@ -51,6 +50,7 @@ type eligibleEvent struct {
 	occurredAt    time.Time
 	// isRefund marks a refunded/refund_partial event (amountFils negative);
 	// feeReversedFils is the MDR the refund handed back, as journaled.
+	netFeeFils      *int64
 	isRefund        bool
 	feeReversedFils money.Fils
 }
@@ -155,7 +155,8 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	rows, err := tx.Query(ctx, `
 		SELECT te.id, te.transaction_id, te.amount_fils, te.occurred_at,
 		       te.event_type IN ('refunded', 'refund_partial') AS is_refund,
-		       COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils
+		       COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils,
+               (te.metadata->>'netFeeFils')::bigint AS net_fee_fils
 		  FROM transaction_events te
 		  JOIN transactions t ON t.id = te.transaction_id
 		 WHERE t.merchant_id = $1
@@ -178,7 +179,7 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	for rows.Next() {
 		var e eligibleEvent
 		var amountFils, feeReversedFils int64
-		if err := rows.Scan(&e.id, &e.transactionID, &amountFils, &e.occurredAt, &e.isRefund, &feeReversedFils); err != nil {
+		if err := rows.Scan(&e.id, &e.transactionID, &amountFils, &e.occurredAt, &e.isRefund, &feeReversedFils, &e.netFeeFils); err != nil {
 			rows.Close()
 			return BatchResult{}, fmt.Errorf("settlement: CloseBatch: scan eligible event: %w", err)
 		}
@@ -226,7 +227,12 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 			if effectiveMdrBps -= tierBonusBps; effectiveMdrBps < 0 {
 				effectiveMdrBps = 0
 			}
-			feeForTxn += ComputeSettlementFee(e.amountFils, effectiveMdrBps, discountBps)
+			if e.netFeeFils != nil {
+				feeForTxn += money.Fils(*e.netFeeFils)
+			} else {
+				// Legacy events have no immutable net fee snapshot.
+				feeForTxn += ComputeSettlementFee(e.amountFils, effectiveMdrBps, discountBps)
+			}
 			eventIDs = append(eventIDs, e.id)
 		}
 		lines = append(lines, txnLine{txnID, grossForTxn, feeForTxn})
@@ -287,7 +293,7 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		// in the 2026-09-14 export).
 		_, err = tx.Exec(ctx, `
 			INSERT INTO scheme_export_lines (settlement_batch_id, transaction_id, amount_fils, amount, line_sequence)
-			VALUES ($1, $2, $3, $3::numeric / 1000, $4)
+			VALUES ($1, $2, $3::bigint, ($3::bigint)::numeric / 1000, $4)
 		`, batchID, line.transactionID, int64(truncated), i+1)
 		if err != nil {
 			return BatchResult{}, fmt.Errorf("settlement: CloseBatch: insert scheme export line: %w", err)
@@ -297,11 +303,11 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		if residue := line.grossFils - truncated; residue > 0 {
 			_, err = tx.Exec(ctx, `
 				INSERT INTO ledger_entries
-				  (entry_group_id, merchant_id, transaction_id, account_id, direction, amount_fils, occurred_at, description)
+				  (entry_group_id, merchant_id, transaction_id, account_id, direction, amount_fils, occurred_at, description, settlement_batch_id)
 				VALUES
-				  ($1, $2, $3, 'card_scheme_clearing',    'credit', $4, now(), 'scheme export: rounding residue'),
-				  ($1, $2, $3, 'scheme_rounding_residue', 'debit',  $4, now(), 'scheme export: rounding residue')
-			`, uuid.New(), merchantID, line.transactionID, int64(residue))
+				  ($1, $2, $3, 'card_scheme_clearing',    'credit', $4, now(), 'scheme export: rounding residue', $5),
+				  ($1, $2, $3, 'scheme_rounding_residue', 'debit',  $4, now(), 'scheme export: rounding residue', $5)
+			`, uuid.New(), merchantID, line.transactionID, int64(residue), batchID)
 			if err != nil {
 				return BatchResult{}, fmt.Errorf("settlement: CloseBatch: post scheme residue: %w", err)
 			}
@@ -322,9 +328,9 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: enqueue outbox event: %w", err)
 	}
 
-	// Step 14: incrementally update the merchant_balances cache.
-	if err := balances.ApplyBatchClose(ctx, tx, merchantID, batchID, netPayout); err != nil {
-		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: apply balance cache delta: %w", err)
+	// Record provenance only; the ledger INSERT trigger maintains money.
+	if _, err := tx.Exec(ctx, `UPDATE merchant_balances SET last_settlement_batch_id = $2 WHERE merchant_id = $1`, merchantID, batchID); err != nil {
+		return BatchResult{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -410,9 +416,7 @@ func PayoutBatch(ctx context.Context, db *pgxpool.Pool, batchID uuid.UUID) (Payo
 		return PayoutResult{}, fmt.Errorf("settlement: PayoutBatch: update batch status: %w", err)
 	}
 
-	if err := balances.ApplyPayout(ctx, tx, merchantID, batchID, money.Fils(netPayout)); err != nil {
-		return PayoutResult{}, fmt.Errorf("settlement: PayoutBatch: apply balance cache delta: %w", err)
-	}
+	// The ledger INSERT trigger maintains merchant_balances atomically.
 
 	if err := tx.Commit(ctx); err != nil {
 		return PayoutResult{}, fmt.Errorf("settlement: PayoutBatch: commit: %w", err)

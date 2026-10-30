@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/filspay/settlement/internal/ledger"
 	"github.com/filspay/settlement/internal/money"
 )
 
@@ -545,5 +546,47 @@ func TestCloseBatch_SchemeAmountMatchesFilsAndResidueIsJournaled(t *testing.T) {
 	}
 	if residue != 5 {
 		t.Errorf("scheme_rounding_residue = %d fils, want 5", residue)
+	}
+}
+
+func TestCloseBatch_UsesHistoricalNetFeeAfterTermsChange(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	merchant := insertActiveMerchant(t, pool, 250)
+	day := time.Date(2026, 4, 13, 0, 0, 0, 0, time.UTC)
+	start, _ := BusinessDayWindow(day)
+	txn, fee := insertCaptureEvent(t, pool, merchant, 250, 10000, start.Add(time.Hour))
+	if _, err := pool.Exec(ctx, `UPDATE transaction_events SET metadata = jsonb_build_object('netFeeFils', $2::bigint) WHERE transaction_id = $1`, txn, int64(fee)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE merchants SET negotiated_discount_bps = 9000, mdr_bps = 500 WHERE id = $1`, merchant); err != nil {
+		t.Fatal(err)
+	}
+	// A rebuild before closing must not cause close to add payable a second time.
+	if _, err := ledger.RebuildMerchantBalance(ctx, pool, merchant); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := CloseBatch(ctx, pool, merchant, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.FeeFils != fee {
+		t.Fatalf("fee %d, want capture-time fee %d", batch.FeeFils, fee)
+	}
+	var cached int64
+	if err = pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`, merchant).Scan(&cached); err != nil {
+		t.Fatal(err)
+	}
+	if cached != 10000-int64(fee) {
+		t.Fatalf("cache %d, want %d", cached, 10000-int64(fee))
+	}
+	if _, err = PayoutBatch(ctx, pool, batch.BatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`, merchant).Scan(&cached); err != nil {
+		t.Fatal(err)
+	}
+	if cached != 0 {
+		t.Fatalf("cache after payout %d, want 0", cached)
 	}
 }

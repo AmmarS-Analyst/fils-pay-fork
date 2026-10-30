@@ -291,6 +291,7 @@ export async function getReconciliationReport(
       `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0) AS net
          FROM ledger_entries
         WHERE merchant_id = $1 AND account_id = 'merchant_payable'
+          AND COALESCE(description, '') NOT LIKE 'settlement payout:%'
           AND occurred_at >= $2 AND occurred_at < $3`,
       [input.merchantId, windowStart, windowEnd],
     ),
@@ -301,11 +302,12 @@ export async function getReconciliationReport(
           AND status IN ('closed', 'paid')`,
       [input.merchantId, input.from, input.to],
     ),
-    pool.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number; fee_fils: string | number }>(
+    pool.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number; fee_fils: string | number; net_fee_fils: string | number | null }>(
       `SELECT te.amount_fils,
               te.event_type IN ('refunded', 'refund_partial') AS is_refund,
               COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils,
-              COALESCE((te.metadata->>'feeFils')::bigint, 0) AS fee_fils
+              COALESCE((te.metadata->>'feeFils')::bigint, 0) AS fee_fils,
+              (te.metadata->>'netFeeFils')::bigint AS net_fee_fils
          FROM transaction_events te
          JOIN transactions t ON t.id = te.transaction_id
         WHERE t.merchant_id = $1
@@ -334,7 +336,7 @@ export async function getReconciliationReport(
     // included) less the discount posting, i.e. exactly what the ledger holds.
     // mdr_bps is not kept in sync with fee_schedules (there is no trigger).
     const chargedFee = toFils(Number(row.fee_fils));
-    const netFee = chargedFee - applyRateFils(chargedFee, discountBps);
+    const netFee = row.net_fee_fils == null ? chargedFee - applyRateFils(chargedFee, discountBps) : Number(row.net_fee_fils);
     pendingUnbatchedFils += amountFils - netFee;
   }
 

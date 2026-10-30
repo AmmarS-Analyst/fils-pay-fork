@@ -27,7 +27,7 @@ func RebuildMerchantBalance(ctx context.Context, db *pgxpool.Pool, merchantID uu
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM merchant_balances WHERE merchant_id = $1 FOR UPDATE`, merchantID); err != nil {
+	if err := lockCacheRow(ctx, tx, merchantID); err != nil {
 		return 0, fmt.Errorf("ledger: RebuildMerchantBalance(%s): lock: %w", merchantID, err)
 	}
 
@@ -92,7 +92,7 @@ func RebuildAllBalances(ctx context.Context, db *pgxpool.Pool) (map[uuid.UUID]Re
 			SELECT merchant_id FROM ledger_entries WHERE account_id = 'merchant_payable'
 			UNION
 			SELECT merchant_id FROM merchant_balances
-		) merchants
+		) merchants ORDER BY merchant_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: RebuildAllBalances: select merchant ids: %w", err)
@@ -112,10 +112,13 @@ func RebuildAllBalances(ctx context.Context, db *pgxpool.Pool) (map[uuid.UUID]Re
 	}
 	rows.Close()
 
-	// TODO: lock merchant_balances rows first, a concurrent CloseBatch increment gets clobbered -- YA
+	// Lock before reading the ledger. Its INSERT trigger uses this same row.
 	diffs := make(map[uuid.UUID]RebuildDiff, len(merchantIDs))
 
 	for _, merchantID := range merchantIDs {
+		if err := lockCacheRow(ctx, tx, merchantID); err != nil {
+			return nil, err
+		}
 		var cachedBefore int64
 		err := tx.QueryRow(ctx, `
 			SELECT COALESCE(cached_payable_fils, 0) FROM merchant_balances WHERE merchant_id = $1
@@ -156,4 +159,15 @@ func RebuildAllBalances(ctx context.Context, db *pgxpool.Pool) (map[uuid.UUID]Re
 	}
 
 	return diffs, nil
+}
+
+// lockCacheRow also creates an absent row before taking its lock. A fresh
+// READ COMMITTED ledger aggregate after this lock includes every committed
+// posting whose cache delta completed before the rebuild.
+func lockCacheRow(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO merchant_balances (merchant_id, cached_payable_fils) VALUES ($1, 0) ON CONFLICT (merchant_id) DO NOTHING`, merchantID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT 1 FROM merchant_balances WHERE merchant_id = $1 FOR UPDATE`, merchantID)
+	return err
 }

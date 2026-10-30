@@ -289,3 +289,36 @@ func TestRecalculateMDR_PaidBatchStaysFrozenAndIsAdjustedOnce(t *testing.T) {
 		t.Errorf("second run adjusted %+v, want nothing (difference already posted)", second.Adjusted)
 	}
 }
+
+func TestRecalculateMDR_ClosedAdjustmentIsNotCountedAgainAfterPayment(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	merchant := insertActiveMerchant(t, pool, 250)
+	day := time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)
+	start, _ := BusinessDayWindow(day)
+	insertCaptureEvent(t, pool, merchant, 250, 10000, start.Add(time.Hour))
+	batch, err := CloseBatch(ctx, pool, merchant, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE merchants SET mdr_bps = 200 WHERE id = $1`, merchant); err != nil {
+		t.Fatal(err)
+	}
+	from, to := recalcWindow(day)
+	if _, err = RecalculateMDR(ctx, pool, merchant, from, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = PayoutBatch(ctx, pool, batch.BatchID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RecalculateMDR(ctx, pool, merchant, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Adjusted) != 0 {
+		t.Fatalf("unchanged paid batch adjusted again: %+v", result.Adjusted)
+	}
+	if bal := payableBalance(t, pool, merchant); bal != 0 {
+		t.Fatalf("payable = %d, want 0", bal)
+	}
+}

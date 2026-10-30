@@ -82,11 +82,8 @@ export async function adjustMerchantBalanceJournaled(
     const entryGroupId = await postLedgerAdjustment(client, input.merchantId, input.deltaFils);
 
     const updated = await client.query<{ cached_payable_fils: string }>(
-      `UPDATE merchant_balances
-          SET cached_payable_fils = cached_payable_fils + $2, updated_at = now()
-        WHERE merchant_id = $1
-      RETURNING cached_payable_fils`,
-      [input.merchantId, input.deltaFils],
+      `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`,
+      [input.merchantId],
     );
     const after = toFils(Number(updated.rows[0]!.cached_payable_fils), { allowNegative: true });
 

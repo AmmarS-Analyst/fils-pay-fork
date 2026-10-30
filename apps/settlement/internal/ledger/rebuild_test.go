@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -151,6 +152,7 @@ func TestRebuildAllBalances_OverwritesDriftedCache(t *testing.T) {
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO merchant_balances (merchant_id, cached_payable_fils, updated_at)
 		VALUES ($1, 999999, now())
+        ON CONFLICT (merchant_id) DO UPDATE SET cached_payable_fils = 999999
 	`, merchantID)
 	if err != nil {
 		t.Fatalf("seed drifted cache: %v", err)
@@ -182,5 +184,47 @@ func TestRebuildAllBalances_OverwritesDriftedCache(t *testing.T) {
 	}
 	if persisted != wantBalance {
 		t.Errorf("persisted cached_payable_fils = %d, want %d (RebuildAllBalances must overwrite, not merely diff)", persisted, wantBalance)
+	}
+}
+
+func TestRebuildAllBalances_WaitsForUncommittedJournalCacheDelta(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	merchant := insertActiveMerchant(t, pool)
+	postLedgerLeg(t, pool, merchant, "credit", 2000)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO ledger_entries(entry_group_id,merchant_id,account_id,direction,amount_fils,occurred_at,description) VALUES($1,$2,'merchant_payable','credit',12000,now(),'pending capture'),($1,$2,'card_scheme_clearing','debit',12000,now(),'pending capture')`, uuid.New(), merchant); err != nil {
+		t.Fatal(err)
+	}
+	// The journal trigger owns the cache row until commit. Rebuild must wait
+	// before taking its ledger snapshot, rather than overwrite with stale 2000.
+	finished := make(chan error, 1)
+	go func() { _, err := RebuildAllBalances(ctx, pool); finished <- err }()
+	select {
+	case err := <-finished:
+		t.Fatalf("rebuild passed uncommitted cache owner: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rebuild did not finish after journal commit")
+	}
+	var got int64
+	if err := pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id=$1`, merchant).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 14000 {
+		t.Fatalf("cache %d, want 14000", got)
 	}
 }

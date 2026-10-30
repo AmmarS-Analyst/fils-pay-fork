@@ -553,3 +553,28 @@ test("GET /v1/settlement/summary counts a multi-part capture once, at the amount
   // Old query: 3,000 + 6,000 + 9,000 running totals = 18,000.
   assert.equal(body.totalCapturedFils, 9_000);
 });
+
+test("reconciliation over multiple days excludes payout movements from production attribution", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("reconciliation-multiday", 250);
+  const txn = await authorize(rawKey, 10_000);
+  await capture(rawKey, txn.id);
+  const from = todayBahrainDateString();
+  await closeAndPayoutBatch(merchantId, from);
+  const to = addOneCalendarDay(addOneCalendarDay(from));
+  const response = await app.inject({ method: "GET", url: `/v1/settlement/reconciliation?from=${from}&to=${to}`, headers: authHeader(rawKey) });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().gapFils, 0, "payout within the range must not be counted twice");
+});
+
+test("reconciliation keeps the recorded capture discount after merchant terms change", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("reconciliation-historical-discount", 250);
+  await pool.query(`UPDATE merchants SET negotiated_discount_bps = 2000 WHERE id = $1`, [merchantId]);
+  const txn = await authorize(rawKey, 10_000);
+  await capture(rawKey, txn.id);
+  await pool.query(`UPDATE merchants SET negotiated_discount_bps = 9000 WHERE id = $1`, [merchantId]);
+  const from = todayBahrainDateString();
+  const response = await app.inject({ method: "GET", url: `/v1/settlement/reconciliation?from=${from}&to=${addOneCalendarDay(from)}`, headers: authHeader(rawKey) });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().pendingUnbatchedFils, 9800);
+  assert.equal(response.json().gapFils, 0);
+});

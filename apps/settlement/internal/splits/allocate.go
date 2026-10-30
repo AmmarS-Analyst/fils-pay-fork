@@ -6,11 +6,11 @@ package splits
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/filspay/settlement/internal/balances"
 	"github.com/filspay/settlement/internal/money"
 )
 
@@ -105,12 +105,19 @@ func PayoutSplitBatch(ctx context.Context, db *pgxpool.Pool, batchID uuid.UUID) 
 	}
 	rows.Close()
 
+	var totalWeight int64
+	for _, child := range weights {
+		totalWeight += child.WeightBps
+	}
+	if len(weights) == 0 || totalWeight != 10000 {
+		return SplitPayoutResult{}, fmt.Errorf("settlement: split weights must total 10000, got %d", totalWeight)
+	}
+
 	// Shares sum exactly to the net payout (no fils lost to per-child rounding).
 	for i, amount := range ChildShares(money.Fils(netPayout), weights) {
 		shares[i].AllocatedFils = amount
 	}
 
-	var totalAllocated money.Fils
 	for _, s := range shares {
 		if s.AllocatedFils <= 0 {
 			continue // ledger_entries.amount_fils has a CHECK (amount_fils > 0)
@@ -134,17 +141,13 @@ func PayoutSplitBatch(ctx context.Context, db *pgxpool.Pool, batchID uuid.UUID) 
 		if err != nil {
 			return SplitPayoutResult{}, err
 		}
-		totalAllocated += s.AllocatedFils
 	}
 
-	// Bring the parent's cached balance down by what the legs above actually
-	// debited from its merchant_payable account, same as PayoutBatch does
-	// for a non-split merchant.
-	// am: should pass netPayout here not totalAllocated, otherwise the cache drifts from the batch
-	if err := balances.ApplyPayout(ctx, tx, parentMerchantID, batchID, totalAllocated); err != nil {
+	// Ledger inserts maintain the payable cache; monitoring follows paid net.
+
+	if _, err := tx.Exec(ctx, `UPDATE merchants SET lifetime_net_payout_monitoring_estimate = lifetime_net_payout_monitoring_estimate + $2 WHERE id = $1`, parentMerchantID, netPayout); err != nil {
 		return SplitPayoutResult{}, err
 	}
-
 	_, err = tx.Exec(ctx, `UPDATE settlement_batches SET status = 'paid', paid_at = now() WHERE id = $1`, batchID)
 	if err != nil {
 		return SplitPayoutResult{}, err

@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/filspay/settlement/internal/balances"
 	"github.com/filspay/settlement/internal/money"
 )
 
@@ -115,7 +114,7 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 		}
 		newNetPayout := b.grossFils - newFee
 		// am: posts against the OLD batch id so it never lands in a new payout?? fixed in FP-244 i think
-		if err := postMdrAdjustment(ctx, tx, merchantID, b.id, diff); err != nil {
+		if err := postMdrAdjustment(ctx, tx, merchantID, b.id, diff, b.status == "paid"); err != nil {
 			return RecalcResult{}, err
 		}
 		if b.status != "paid" {
@@ -125,12 +124,7 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 				return RecalcResult{}, fmt.Errorf("settlement: RecalculateMDR: update batch %s: %w", b.id, err)
 			}
 		}
-		// A fee increase (diff > 0) reduces net payout owed, so the cache
-		// moves by -diff — the same signed-delta idiom ApplyBatchClose
-		// already exposes for a batch close's own net payout.
-		if err := balances.ApplyBatchClose(ctx, tx, merchantID, b.id, -diff); err != nil {
-			return RecalcResult{}, fmt.Errorf("settlement: RecalculateMDR: apply cache delta for %s: %w", b.id, err)
-		}
+		// Ledger insertion maintains the payable cache atomically.
 		adjusted = append(adjusted, BatchAdjustment{
 			BatchID:    b.id,
 			BatchDate:  b.batchDate,
@@ -156,7 +150,9 @@ func priorMdrAdjustment(ctx context.Context, tx pgx.Tx, batchID uuid.UUID) (mone
 		  FROM ledger_entries
 		 WHERE settlement_batch_id = $1
 		   AND account_id = 'platform_fee_revenue'
-		   AND description = 'MDR recalculation adjustment'
+		   AND (description = 'MDR recalculation adjustment: paid batch'
+                OR (description = 'MDR recalculation adjustment'
+                    AND occurred_at >= (SELECT paid_at FROM settlement_batches WHERE id = $1)))
 	`, batchID).Scan(&net)
 	if err != nil {
 		return 0, fmt.Errorf("settlement: RecalculateMDR: prior adjustments for %s: %w", batchID, err)
@@ -211,7 +207,7 @@ func recomputeBatchFee(ctx context.Context, tx pgx.Tx, batchID uuid.UUID, mdrBps
 //
 // Both legs are dated now(), not the batch date, so no closed period is
 // reopened by the adjustment itself.
-func postMdrAdjustment(ctx context.Context, tx pgx.Tx, merchantID, batchID uuid.UUID, diff money.Fils) error {
+func postMdrAdjustment(ctx context.Context, tx pgx.Tx, merchantID, batchID uuid.UUID, diff money.Fils, paid bool) error {
 	if diff == 0 {
 		return nil
 	}
@@ -220,19 +216,22 @@ func postMdrAdjustment(ctx context.Context, tx pgx.Tx, merchantID, batchID uuid.
 		magnitude = -magnitude
 	}
 
-	// YA 2026-01-20: a fee decrease still debits merchant_payable here, same as an increase, the sign is in the amount
 	debitAccount, creditAccount := "merchant_payable", "platform_fee_revenue"
 	if diff < 0 {
 		debitAccount, creditAccount = "platform_fee_revenue", "merchant_payable"
 	}
 
+	description := "MDR recalculation adjustment"
+	if paid {
+		description += ": paid batch"
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO ledger_entries
 		  (entry_group_id, merchant_id, settlement_batch_id, account_id, direction, amount_fils, occurred_at, description)
 		VALUES
-		  ($1, $2, $3, $4, 'debit',  $6, now(), 'MDR recalculation adjustment'),
-		  ($1, $2, $3, $5, 'credit', $6, now(), 'MDR recalculation adjustment')
-	`, uuid.New(), merchantID, batchID, debitAccount, creditAccount, int64(magnitude))
+		  ($1, $2, $3, $4, 'debit',  $6, now(), $7),
+		  ($1, $2, $3, $5, 'credit', $6, now(), $7)
+	`, uuid.New(), merchantID, batchID, debitAccount, creditAccount, int64(magnitude), description)
 	if err != nil {
 		return fmt.Errorf("settlement: RecalculateMDR: post adjustment for batch %s: %w", batchID, err)
 	}
