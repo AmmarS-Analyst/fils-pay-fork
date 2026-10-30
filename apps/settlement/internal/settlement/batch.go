@@ -49,6 +49,10 @@ type eligibleEvent struct {
 	transactionID uuid.UUID
 	amountFils    money.Fils
 	occurredAt    time.Time
+	// isRefund marks a refunded/refund_partial event (amountFils negative);
+	// feeReversedFils is the MDR the refund handed back, as journaled.
+	isRefund        bool
+	feeReversedFils money.Fils
 }
 
 // CloseBatch computes and freezes settlement figures for one merchant's
@@ -145,14 +149,21 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	// direction. Every amount is read from te.amount_fils — the exact
 	// incremental delta capture.ts already recorded for that one real
 	// event — never from transactions.captured_fils (a running total).
+	//
+	// FP-300: refund events are claimed too, so a refund reduces the payout.
+	// Refunds carried forward from earlier days are included.
 	rows, err := tx.Query(ctx, `
-		SELECT te.id, te.transaction_id, te.amount_fils, te.occurred_at
+		SELECT te.id, te.transaction_id, te.amount_fils, te.occurred_at,
+		       te.event_type IN ('refunded', 'refund_partial') AS is_refund,
+		       COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils
 		  FROM transaction_events te
 		  JOIN transactions t ON t.id = te.transaction_id
 		 WHERE t.merchant_id = $1
-		   AND te.event_type IN ('captured', 'partially_captured')
 		   AND te.settlement_batch_id IS NULL
-		   AND te.occurred_at >= $2 AND te.occurred_at < $3
+		   AND (
+		        (te.event_type IN ('captured', 'partially_captured') AND te.occurred_at >= $2 AND te.occurred_at < $3)
+		     OR (te.event_type IN ('refunded', 'refund_partial') AND te.occurred_at < $3)
+		   )
 		 ORDER BY te.transaction_id, te.occurred_at
 		 FOR UPDATE OF te
 	`, merchantID, start, end)
@@ -161,16 +172,22 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	}
 
 	var events []eligibleEvent
+	var refunds []eligibleEvent
 	var orderedTxnIDs []uuid.UUID
 	seenTxn := make(map[uuid.UUID]bool)
 	for rows.Next() {
 		var e eligibleEvent
-		var amountFils int64
-		if err := rows.Scan(&e.id, &e.transactionID, &amountFils, &e.occurredAt); err != nil {
+		var amountFils, feeReversedFils int64
+		if err := rows.Scan(&e.id, &e.transactionID, &amountFils, &e.occurredAt, &e.isRefund, &feeReversedFils); err != nil {
 			rows.Close()
 			return BatchResult{}, fmt.Errorf("settlement: CloseBatch: scan eligible event: %w", err)
 		}
 		e.amountFils = money.Fils(amountFils)
+		e.feeReversedFils = money.Fils(feeReversedFils)
+		if e.isRefund {
+			refunds = append(refunds, e)
+			continue
+		}
 		events = append(events, e)
 		if !seenTxn[e.transactionID] {
 			seenTxn[e.transactionID] = true
@@ -216,13 +233,29 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		batchGross += grossForTxn
 		batchFee += feeForTxn
 	}
+	// Capture-only gross: the scheme lines above and the platform volume
+	// counter below measure what was processed, not what was returned.
+	captureGross := batchGross
+
+	// FP-300: net each refund into the batch (gross down by the refund, fee down
+	// by the MDR it reversed). A refund that would push the payout below zero
+	// waits for a later day.
+	sort.SliceStable(refunds, func(a, b int) bool { return refunds[a].occurredAt.Before(refunds[b].occurredAt) })
+	for _, r := range refunds {
+		gross, fee := batchGross+r.amountFils, batchFee-r.feeReversedFils
+		if NetPayableFils(gross, fee) < 0 {
+			break
+		}
+		batchGross, batchFee = gross, fee
+		eventIDs = append(eventIDs, r.id)
+	}
 	netPayout := NetPayableFils(batchGross, batchFee)
 
 	// Record this batch's contribution to the platform-wide lifetime
 	// processed-volume counter, in the same transaction that freezes this
 	// batch's own totals — so the counter and the batch it describes
 	// commit or roll back together.
-	if err := RecordPlatformProcessedVolume(ctx, tx, platformProcessedFils, int64(batchGross)); err != nil {
+	if err := RecordPlatformProcessedVolume(ctx, tx, platformProcessedFils, int64(captureGross)); err != nil {
 		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: record platform volume: %w", err)
 	}
 

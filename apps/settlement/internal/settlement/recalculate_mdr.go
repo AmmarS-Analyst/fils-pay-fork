@@ -139,7 +139,10 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 // CloseBatch would have produced at today's rate.
 func recomputeBatchFee(ctx context.Context, tx pgx.Tx, batchID uuid.UUID, mdrBps, discountBps int64) (money.Fils, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT amount_fils FROM transaction_events WHERE settlement_batch_id = $1 ORDER BY id
+		SELECT amount_fils,
+		       event_type IN ('refunded', 'refund_partial') AS is_refund,
+		       COALESCE((metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils
+		  FROM transaction_events WHERE settlement_batch_id = $1 ORDER BY id
 	`, batchID)
 	if err != nil {
 		return 0, fmt.Errorf("settlement: RecalculateMDR: select batch events for %s: %w", batchID, err)
@@ -148,12 +151,18 @@ func recomputeBatchFee(ctx context.Context, tx pgx.Tx, batchID uuid.UUID, mdrBps
 
 	var fee money.Fils
 	for rows.Next() {
-		var amountFils int64
-		if err := rows.Scan(&amountFils); err != nil {
+		var amountFils, feeReversedFils int64
+		var isRefund bool
+		if err := rows.Scan(&amountFils, &isRefund, &feeReversedFils); err != nil {
 			return 0, fmt.Errorf("settlement: RecalculateMDR: scan batch event for %s: %w", batchID, err)
 		}
-		// FH: sums every event with this batch id -- incl. refund events once FP-212 lands? need an event_type filter?
-		// MK: refunds won't carry settlement_batch_id on transaction_events, they live in their own table. non-issue
+		// FP-300: refund events are batched too (CloseBatch nets them). Their
+		// fee is what the refund actually reversed, not a new rate applied to
+		// a negative amount.
+		if isRefund {
+			fee -= money.Fils(feeReversedFils)
+			continue
+		}
 		fee += ComputeSettlementFee(money.Fils(amountFils), mdrBps, discountBps)
 	}
 	if err := rows.Err(); err != nil {
