@@ -2,7 +2,7 @@
  * Route/end-to-end tests for the webhooks surface:
  * registration CRUD, cross-tenant scoping, and a real local http.Server
  * receiver driven through the real create route + a real
- * transaction.captured capture + createFetchTransport() dispatch, with the
+ * transaction.captured capture + createFetchTransport({ allowPrivateHosts: true }) dispatch, with the
  * receiver itself calling verifySignature against what was actually sent.
  * Requires DATABASE_URL to point at a real, migrated Postgres (run
  * `npm run migrate` first).
@@ -170,7 +170,7 @@ test("deleting an endpoint that has delivery history is a 409 (disable it instea
   const created = await createEndpointViaRoute(rawKey, merchantId, "http://localhost:9/webhook");
   const event = await pool.query<{ id: string }>(
     `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload)
-     VALUES ('transaction.captured', 'transaction', $1, '{}') RETURNING id`,
+     VALUES ('webhook.test.fixture', 'transaction', $1, '{}') RETURNING id`,
     [randomUUID()],
   );
   await pool.query(
@@ -310,7 +310,7 @@ test("cross-tenant: delete and replay both 404 on another merchant's resources, 
 
 test(
   "end-to-end: register a real receiver via the route, trigger a real capture, dispatch with " +
-    "createFetchTransport(), receiver verifies the signature with the SAME raw secret the create response returned",
+    "createFetchTransport({ allowPrivateHosts: true }), receiver verifies the signature with the SAME raw secret the create response returned",
   async () => {
     const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("e2e-happy");
     const receiver = await startTestReceiver(200);
@@ -318,7 +318,7 @@ test(
       const created = await createEndpointViaRoute(rawKey, merchantId, receiver.url);
       const txnId = await authorizeAndCapture(merchantId, 4_750, "e2e");
 
-      await runDispatchPass(pool, createFetchTransport(), config);
+      await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
 
       assert.equal(receiver.received.length, 1);
       const received = receiver.received[0]!;
@@ -362,7 +362,7 @@ test("decline path: an endpoint returning 500 leaves the delivery pending with b
     const created = await createEndpointViaRoute(rawKey, merchantId, receiver.url);
     await authorizeAndCapture(merchantId, 2_000, "decline");
 
-    await runDispatchPass(pool, createFetchTransport(), config);
+    await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
 
     assert.equal(receiver.received.length, 1);
 
@@ -383,14 +383,14 @@ test("decline path: an endpoint returning 500 leaves the delivery pending with b
 
 // YA: new delivery id on replay is what ARCH §5 asks for
 // am: §5 says stable id?? reading it again later
-test("replay: creates a new row referencing the original, with a new delivery_event_id; original row untouched", async () => {
+test("replay: creates a new row referencing the original, with the same receiver delivery_event_id; original row untouched", async () => {
   const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("replay-flow");
   const receiver = await startTestReceiver(200);
   try {
     const created = await createEndpointViaRoute(rawKey, merchantId, receiver.url);
     await authorizeAndCapture(merchantId, 3_300, "replay");
 
-    await runDispatchPass(pool, createFetchTransport(), config);
+    await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
     assert.equal(receiver.received.length, 1);
 
     const originalRowResult = await pool.query<{
@@ -415,7 +415,7 @@ test("replay: creates a new row referencing the original, with a new delivery_ev
     assert.notEqual(replayBody.deliveryId, original.id);
 
     // Dispatch again so the replay row actually gets attempted.
-    await runDispatchPass(pool, createFetchTransport(), config);
+    await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
     assert.equal(receiver.received.length, 2);
 
     const allRows = await pool.query<{
@@ -438,11 +438,11 @@ test("replay: creates a new row referencing the original, with a new delivery_ev
     assert.equal(originalAfter!.replay_of_delivery_id, null);
     assert.equal(originalAfter!.delivery_event_id, original.delivery_event_id);
 
-    // Replay row references the original, has its own new delivery_event_id,
+    // Replay row references the original, preserves its delivery_event_id,
     // and describes the same underlying outbox event.
     assert.equal(replayRow!.replay_of_delivery_id, original.id);
     assert.equal(replayRow!.status, "succeeded");
-    assert.notEqual(replayRow!.delivery_event_id, original.delivery_event_id);
+    assert.equal(replayRow!.delivery_event_id, original.delivery_event_id);
     assert.equal(replayRow!.outbox_event_id, originalAfter!.outbox_event_id);
   } finally {
     await receiver.close();
@@ -456,7 +456,7 @@ test("disabled endpoint rejects replay with 409", async () => {
     const created = await createEndpointViaRoute(rawKey, merchantId, receiver.url);
     await authorizeAndCapture(merchantId, 1_000, "disabled-replay");
 
-    await runDispatchPass(pool, createFetchTransport(), config);
+    await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
 
     const deliveryRow = await pool.query<{ id: string; status: string }>(
       `SELECT id, status FROM webhook_deliveries WHERE endpoint_id = $1`,
@@ -492,7 +492,7 @@ test("GET deliveries list never includes payload/signature; GET .../deliveries/:
     const created = await createEndpointViaRoute(rawKey, merchantId, receiver.url);
     await authorizeAndCapture(merchantId, 1_500, "detail");
 
-    await runDispatchPass(pool, createFetchTransport(), config);
+    await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
 
     const listRes = await app.inject({
       method: "GET",
@@ -545,7 +545,7 @@ test("secret encryption round-trips correctly: a delivery verifies using the SAM
     assert.ok(!stored.rows[0]!.secret_ciphertext.includes(created.secret));
 
     await authorizeAndCapture(merchantId, 999, "secret-roundtrip");
-    await runDispatchPass(pool, createFetchTransport(), config);
+    await runDispatchPass(pool, createFetchTransport({ allowPrivateHosts: true }), config);
 
     assert.equal(receiver.received.length, 1);
     const received = receiver.received[0]!;

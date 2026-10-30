@@ -138,6 +138,7 @@ interface DueDeliveryRow {
   attempt_count: number;
   url: string;
   secret_ciphertext: string;
+  lease_token: string;
 }
 
 /**
@@ -154,6 +155,11 @@ async function attemptOneDelivery(
   config: DispatcherConfig,
   row: DueDeliveryRow,
 ): Promise<void> {
+  const endpoint = await pool.query<{status: string}>("SELECT status FROM webhook_endpoints WHERE id = $1", [row.endpoint_id]);
+  if (endpoint.rows[0]?.status !== "active") {
+    await finishDelivery(pool, row, `UPDATE webhook_deliveries SET status = 'failed' WHERE id = $1`, [row.id]);
+    return;
+  }
   const key = decodeEncryptionKey(config.webhookSecretEncryptionKey);
   const secret = decryptSecret(row.secret_ciphertext, key);
   const { signature } = signPayload(row.payload, secret);
@@ -162,6 +168,17 @@ async function attemptOneDelivery(
     const effect = PRE_DELIVERY_EFFECTS[row.event_type];
     if (effect) await effect(pool, row.payload);
   }
+
+  // Effects may wait on database locks. Revalidate ownership and endpoint
+  // immediately before network handoff, rather than trusting the initial claim.
+  const handoff = await pool.query(
+    `UPDATE webhook_deliveries wd SET lease_until = now() + ($3::text || ' milliseconds')::interval
+     WHERE wd.id = $1 AND wd.lease_token = $2 AND wd.lease_until > now()
+       AND EXISTS (SELECT 1 FROM webhook_endpoints we WHERE we.id=wd.endpoint_id AND we.status='active')
+     RETURNING wd.id`,
+    [row.id, row.lease_token, Math.max(120_000, config.webhookRequestTimeoutMs + 30_000)],
+  );
+  if (handoff.rowCount !== 1) return;
 
   const result = await transport({
     url: row.url,
@@ -181,9 +198,9 @@ async function attemptOneDelivery(
   const responseBodyParam = isTransportFailure ? null : result.body;
 
   if (!isTransportFailure && result.statusCode! >= 200 && result.statusCode! < 300) {
-    await pool.query(
+    await finishDelivery(pool, row,
       `UPDATE webhook_deliveries
-          SET status = 'succeeded', attempt_count = attempt_count + 1, signature = $2,
+          SET status = 'succeeded', signature = $2,
               response_status_code = $3, response_body_excerpt = left($4, 2000), last_attempted_at = now()
         WHERE id = $1`,
       [row.id, signature, responseStatusCode, responseBodyParam],
@@ -193,9 +210,9 @@ async function attemptOneDelivery(
 
   const newAttemptCount = row.attempt_count + 1;
   if (newAttemptCount >= config.webhookMaxAttempts) {
-    await pool.query(
+    await finishDelivery(pool, row,
       `UPDATE webhook_deliveries
-          SET status = 'exhausted', attempt_count = attempt_count + 1, signature = $2,
+          SET status = 'exhausted', signature = $2,
               response_status_code = $3, response_body_excerpt = left($4, 2000), last_attempted_at = now()
         WHERE id = $1`,
       [row.id, signature, responseStatusCode, responseBodyParam],
@@ -204,9 +221,9 @@ async function attemptOneDelivery(
   }
 
   const delayMs = backoffDelayMs(newAttemptCount, config);
-  await pool.query(
+  await finishDelivery(pool, row,
     `UPDATE webhook_deliveries
-        SET attempt_count = attempt_count + 1, signature = $2,
+        SET signature = $2,
             response_status_code = $3, response_body_excerpt = left($4, 2000),
             next_attempt_at = now() + ($5::text || ' milliseconds')::interval, last_attempted_at = now()
       WHERE id = $1`,
@@ -214,41 +231,54 @@ async function attemptOneDelivery(
   );
 }
 
-/** Step B: attempt every currently-due 'pending' delivery, sequentially. */
-// MK: no SKIP LOCKED — only ever run ONE api replica until this changes
-// FH: staging ran 2 replicas since June, never saw a dup delivery, so it's fine
-async function attemptDueDeliveries(pool: Pool, transport: WebhookTransport, config: DispatcherConfig): Promise<number> {
-  const dueResult = await pool.query<DueDeliveryRow>(
-    `SELECT wd.id, wd.endpoint_id, wd.event_type, wd.delivery_event_id, wd.payload, wd.attempt_count, we.url, we.secret_ciphertext
-       FROM webhook_deliveries wd
-       JOIN webhook_endpoints we ON we.id = wd.endpoint_id
-      WHERE wd.status = 'pending' AND wd.next_attempt_at <= now()
-      ORDER BY wd.next_attempt_at ASC
-      LIMIT $1`,
-    [STEP_B_BATCH_LIMIT],
-  );
+/** Update only the claim we still own; stale workers cannot overwrite a retry. */
+async function finishDelivery(pool: Pool, row: DueDeliveryRow, sql: string, values: unknown[]): Promise<void> {
+  const fenced = sql.replace("WHERE id = $1", `, lease_token = NULL, lease_until = NULL WHERE id = $1 AND lease_token = $${values.length + 1}`);
+  await pool.query(fenced, [...values, row.lease_token]);
+}
 
-  for (const row of dueResult.rows) {
+/** Claim one row immediately before sending, so queued work cannot outlive its lease. */
+async function attemptDueDeliveries(pool: Pool, transport: WebhookTransport, config: DispatcherConfig): Promise<number> {
+  await pool.query(`UPDATE webhook_deliveries SET status='exhausted',lease_token=NULL,lease_until=NULL
+    WHERE status='pending' AND attempt_count >= $1 AND (lease_until IS NULL OR lease_until <= now())`, [config.webhookMaxAttempts]);
+  let attempted = 0;
+  for (; attempted < STEP_B_BATCH_LIMIT; attempted++) {
+    const token = randomUUID();
+    const dueResult = await pool.query<DueDeliveryRow>(
+      `WITH due AS (
+         SELECT wd.id FROM webhook_deliveries wd
+         JOIN webhook_endpoints we ON we.id = wd.endpoint_id AND we.status = 'active'
+         WHERE wd.status = 'pending' AND wd.next_attempt_at <= now() AND wd.attempt_count < $3
+           AND (wd.lease_until IS NULL OR wd.lease_until <= now())
+         ORDER BY wd.next_attempt_at, wd.id
+         FOR UPDATE OF wd SKIP LOCKED LIMIT 1
+       ), claimed AS (
+         UPDATE webhook_deliveries wd SET lease_token = $1,
+           lease_until = now() + ($2::text || ' milliseconds')::interval,
+           attempt_count = attempt_count + 1, last_attempted_at = now()
+         FROM due WHERE wd.id = due.id RETURNING wd.*
+       )
+       SELECT c.id, c.endpoint_id, c.event_type, c.delivery_event_id, c.payload,
+              c.attempt_count - 1 AS attempt_count, c.lease_token, we.url, we.secret_ciphertext
+       FROM claimed c JOIN webhook_endpoints we ON we.id = c.endpoint_id`,
+      [token, Math.max(120_000, config.webhookRequestTimeoutMs + 30_000), config.webhookMaxAttempts],
+    );
+    const row = dueResult.rows[0];
+    if (!row) break;
     try {
       await attemptOneDelivery(pool, transport, config, row);
     } catch (err: unknown) {
-      // A single row throwing before/around the transport call (e.g. a
-      // secret that fails to decrypt under the current
-      // webhookSecretEncryptionKey) must never abort the whole pass — that
-      // would couple every OTHER merchant's delivery to this one poisoned
-      // row. Endpoints are never coupled to each other.
-      // Deliberately leave this row's status/attempt_count/next_attempt_at
-      // untouched: it is simply retried next pass, which self-heals if the
-      // failure was transient and otherwise degrades to "this one row never
-      // progresses" rather than "webhook delivery silently stops platform-
-      // wide."
-      console.error(
-        "[webhooks/dispatcher] delivery attempt threw before/around transport call, skipping row for this pass",
-        { deliveryId: row.id, endpointId: row.endpoint_id, err },
-      );
+      const exhausted = row.attempt_count + 1 >= config.webhookMaxAttempts;
+      await finishDelivery(pool, row,
+        `UPDATE webhook_deliveries SET status = $2,
+           next_attempt_at = now() + ($3::text || ' milliseconds')::interval,
+           response_body_excerpt = $4 WHERE id = $1`,
+        [row.id, exhausted ? "exhausted" : "pending", backoffDelayMs(row.attempt_count + 1, config),
+          String(err).slice(0, 2000)]);
+      console.error("[webhooks/dispatcher] delivery attempt failed", { deliveryId: row.id, err });
     }
   }
-  return dueResult.rows.length;
+  return attempted;
 }
 
 /**

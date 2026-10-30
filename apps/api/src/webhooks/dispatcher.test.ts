@@ -336,7 +336,7 @@ test("no backfill: an endpoint registered after an event was enqueued never gets
   assert.equal(captured.length, 1);
 });
 
-test("per-row isolation: one poisoned row (undecryptable secret) throwing before the transport call never blocks another merchant's healthy delivery in the same pass, and the poisoned row's state is left unchanged rather than crashing the pass", async () => {
+test("per-row isolation: one poisoned row (undecryptable secret) throwing before the transport call never blocks another merchant's healthy delivery in the same pass, and poisoned rows consume retry budget rather than starving the queue", async () => {
   const poisonedMerchantId = await createMerchant("poisoned");
   const poisonedEndpoint = await createEndpoint(poisonedMerchantId, "http://poisoned.test/webhook");
   const poisonedOutboxEvent = await enqueueCaptured(poisonedMerchantId);
@@ -380,7 +380,7 @@ test("per-row isolation: one poisoned row (undecryptable secret) throwing before
   // next_attempt_at so it is simply retried next pass.
   const poisonedDelivery = await getDelivery(String(poisonedOutboxEvent.id), poisonedEndpoint.id);
   assert.equal(poisonedDelivery.status, "pending");
-  assert.equal(poisonedDelivery.attempt_count, 0);
+  assert.equal(poisonedDelivery.attempt_count, 1);
   assert.equal(poisonedDelivery.response_status_code, null);
   assert.equal(poisonedDelivery.signature, null);
 
@@ -390,7 +390,7 @@ test("per-row isolation: one poisoned row (undecryptable secret) throwing before
   await assert.doesNotReject(runDispatchPass(pool, transport, config));
   const poisonedAfterSecondPass = await getDelivery(String(poisonedOutboxEvent.id), poisonedEndpoint.id);
   assert.equal(poisonedAfterSecondPass.status, "pending");
-  assert.equal(poisonedAfterSecondPass.attempt_count, 0);
+  assert.equal(poisonedAfterSecondPass.attempt_count, 1);
 });
 
 test("a disabled endpoint gets no delivery row for a new event", async () => {
@@ -407,4 +407,81 @@ test("a disabled endpoint gets no delivery row for a new event", async () => {
     endpoint.id,
   ]);
   assert.equal(rows.rows.length, 0);
+});
+
+
+test("two dispatcher processes claim a due delivery only once", async () => {
+  const merchantId = await createMerchant("concurrent-dispatch");
+  const endpoint = await createEndpoint(merchantId, `http://concurrent.test/${randomUUID()}`);
+  const event = await enqueueCaptured(merchantId);
+  let sends = 0;
+  const transport: WebhookTransport = async (request) => {
+    if (request.url === endpoint.url) {
+      sends++;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return {statusCode: 200, body: "ok"};
+  };
+  await Promise.all([runDispatchPass(pool, transport, config), runDispatchPass(pool, transport, config)]);
+  assert.equal(sends, 1);
+  assert.equal((await getDelivery(String(event.id), endpoint.id)).attempt_count, 1);
+});
+
+test("expired delivery leases recover after a worker crash", async () => {
+  const merchantId = await createMerchant("lease-recovery");
+  const endpoint = await createEndpoint(merchantId, `http://recovery.test/${randomUUID()}`);
+  const event = await enqueueCaptured(merchantId);
+  await runDispatchPass(pool, alwaysRespond(500), config);
+  const delivery = await getDelivery(String(event.id), endpoint.id);
+  await pool.query(`UPDATE webhook_deliveries SET lease_token=$2,lease_until=now()-interval '1 second',next_attempt_at=now()-interval '1 second' WHERE id=$1`,[delivery.id, randomUUID()]);
+  await runDispatchPass(pool, alwaysRespond(200), config);
+  assert.equal((await getDelivery(String(event.id), endpoint.id)).status, "succeeded");
+});
+
+
+for (const interrupt of ["disable", "steal"] as const) {
+  test(`delivery handoff stops when ${interrupt} happens during payout effect`, async () => {
+    const merchantId = await createMerchant(`handoff-${interrupt}`);
+    const endpoint = await createEndpoint(merchantId, `http://handoff.test/${randomUUID()}`);
+    const batch = await pool.query<{id:string}>(`INSERT INTO settlement_batches(merchant_id,batch_date,status,gross_fils,fee_fils,net_payout_fils)
+      VALUES($1,'2026-10-29','paid',1000,25,975) RETURNING id`,[merchantId]);
+    const batchId = batch.rows[0]!.id;
+    const gate = await pool.connect();
+    try {
+      await gate.query("BEGIN");
+      await gate.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`payout-disbursement:${batchId}`]);
+      const event=await enqueueEvent(pool,{eventType:"settlement.paid",aggregateType:"settlement_batch",aggregateId:batchId,
+        payload:{merchantId,batchDate:"2026-10-29",netPayoutFils:975}});
+      let sends=0;
+      const running=runDispatchPass(pool,async(request)=>{if(request.url===endpoint.url)sends++;return {statusCode:200,body:"ok"};},config);
+      let blocked=false;
+      for(let i=0;i<100;i++) {
+        const wait=await pool.query<{waiting:boolean}>("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event='advisory' AND query LIKE '%payout-disbursement%' ) AS waiting");
+        // Query text uses a parameter, so also inspect held delivery lease.
+        const leased=await pool.query("SELECT 1 FROM webhook_deliveries WHERE outbox_event_id=$1 AND lease_token IS NOT NULL",[String(event.id)]);
+        if(leased.rowCount) {blocked=true;break;}
+        await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      assert.ok(blocked,"worker claimed the delivery before interruption");
+      if(interrupt==="disable") await pool.query("UPDATE webhook_endpoints SET status='disabled' WHERE id=$1",[endpoint.id]);
+      else await pool.query("UPDATE webhook_deliveries SET lease_token=$2 WHERE outbox_event_id=$1",[String(event.id),randomUUID()]);
+      await gate.query("COMMIT");
+      await running;
+      assert.equal(sends,0,"stale or disabled endpoint must not receive a network request");
+    } finally {await gate.query("ROLLBACK");gate.release();}
+  });
+}
+
+test("crashed workers cannot exceed the retry budget",async()=>{
+  const merchantId=await createMerchant("crash-budget");
+  const endpoint=await createEndpoint(merchantId,`http://crash-budget.test/${randomUUID()}`);
+  const event=await enqueueCaptured(merchantId);
+  await runDispatchPass(pool,alwaysRespond(500),config);
+  await pool.query(`UPDATE webhook_deliveries SET attempt_count=$2,lease_token=$3,lease_until=now()-interval '1 second',next_attempt_at=now()-interval '1 second'
+    WHERE outbox_event_id=$1`,[String(event.id),config.webhookMaxAttempts,randomUUID()]);
+  let sends=0;
+  await runDispatchPass(pool,async()=>{sends++;return {statusCode:200,body:"ok"};},config);
+  assert.equal((await getDelivery(String(event.id),endpoint.id)).status,"exhausted");
+  // Other due test rows may be attempted; the exhausted target remains fenced.
+  assert.equal((await getDelivery(String(event.id),endpoint.id)).attempt_count,config.webhookMaxAttempts);
 });
