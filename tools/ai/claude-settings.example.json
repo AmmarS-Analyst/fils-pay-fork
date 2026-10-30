@@ -1,0 +1,36 @@
+{
+  "_comment": "Permission rules for an AI agent working in this repo. To activate, copy this file to .claude/settings.json (and remove this _comment key). It is committed as an example so the rules are reviewable without changing any running agent's permissions.",
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx tsx --test:*)",
+      "Bash(npm run migrate)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git switch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git merge --ff-only:*)",
+      "Bash(bash tools/ai/*)",
+      "Bash(node tools/ai/*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(docker:*)",
+      "Bash(./ops/deploy.sh:*)",
+      "Bash(npm audit fix:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(rm -rf:*)",
+      "Read(./ops/.env.prod)",
+      "Read(./ops/.env)"
+    ]
+  }
+}
