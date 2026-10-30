@@ -165,6 +165,8 @@ services:
     command: ["npm", "run", "seed"]
     environment:
       DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
+      # same key as the API, or the API cannot decrypt seeded webhook secrets
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?missing}
       SEED_RESET: ${SEED_RESET:-}
     depends_on:
       migrate:
