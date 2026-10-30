@@ -1,0 +1,49 @@
+{
+  "scenario": "Create link, GET checkout, pay simulated card",
+  "limits": "API cgroup CPUQuota50%, MemoryMax512MiB; local PostgreSQL unconstrained; simulator100-400ms each call",
+  "stages": [
+    {
+      "concurrency": 1,
+      "completed": 14,
+      "elapsedMs": 8005,
+      "checkoutsPerSecond": 1.7488293528683123,
+      "p50Ms": 546.4507390000008,
+      "p95Ms": 762.7535929999999,
+      "errors": {}
+    },
+    {
+      "concurrency": 4,
+      "completed": 60,
+      "elapsedMs": 8463,
+      "checkoutsPerSecond": 7.08975612286449,
+      "p50Ms": 601.9918469999993,
+      "p95Ms": 742.545223000001,
+      "errors": {}
+    },
+    {
+      "concurrency": 8,
+      "completed": 77,
+      "elapsedMs": 8727,
+      "checkoutsPerSecond": 8.823476489779514,
+      "p50Ms": 874.6500500000002,
+      "p95Ms": 1189.037650000002,
+      "errors": {}
+    },
+    {
+      "concurrency": 16,
+      "completed": 84,
+      "elapsedMs": 9188,
+      "checkoutsPerSecond": 9.142720896164487,
+      "p50Ms": 1682.682886999999,
+      "p95Ms": 2070.2552170000017,
+      "errors": {}
+    }
+  ],
+  "integrity": {
+    "paid_links": "235",
+    "captured_transactions": "235",
+    "unbalanced_groups": "0",
+    "cached_payable": "229125",
+    "ledger_payable": "229125"
+  }
+}

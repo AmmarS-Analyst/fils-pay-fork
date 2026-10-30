@@ -1,0 +1,41 @@
+{
+  "checks": [
+    "merchant password + OTP login and pending-session rejection",
+    "merchant navigation: Payment links",
+    "merchant navigation: Webhooks",
+    "merchant navigation: Settlement",
+    "merchant navigation: Reconciliation",
+    "merchant navigation: Overview",
+    "merchant navigation: Transactions",
+    "create payment link through merchant browser form",
+    "public checkout charges a simulated card and shows success",
+    "partial then full refund through merchant browser and exact fee conservation",
+    "admin password + OTP login and pending-session rejection",
+    "admin navigation: Credits",
+    "admin navigation: Settlement ops",
+    "admin navigation: Import adjustments",
+    "admin navigation: Webhook replay",
+    "admin navigation: Merchants",
+    "merchant logout revokes the session",
+    "admin logout revokes the session"
+  ],
+  "errors": [],
+  "serverErrors": [],
+  "overflow": [],
+  "screenshots": [
+    "merchant-transactions-desktop.png",
+    "merchant-transactions-mobile.png",
+    "checkout-mobile.png",
+    "checkout-success-mobile.png",
+    "merchant-refunded-transaction-desktop.png",
+    "admin-merchants-desktop.png",
+    "admin-merchants-mobile.png"
+  ],
+  "refundState": {
+    "status": "refunded",
+    "captured_fils": "1000",
+    "refunded_fils": "1000",
+    "reversed": "22",
+    "retained_fee": "0"
+  }
+}

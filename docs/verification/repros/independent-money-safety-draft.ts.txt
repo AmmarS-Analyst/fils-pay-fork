@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { test } from "node:test";
+import { Pool } from "pg";
+import { toFils } from "@filspay/money";
+import { createAcquirerSimulator } from "../../apps/api/src/acquirer/simulator.js";
+import { loadConfig } from "../../apps/api/src/config.js";
+import { recordKycReview } from "../../apps/api/src/onboarding/review.js";
+import { authorizeTransaction } from "../../apps/api/src/payments/authorize.js";
+import { captureTransaction } from "../../apps/api/src/payments/capture.js";
+import { processRefund } from "../../apps/api/src/payments/processRefund.js";
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const config = loadConfig({ DATABASE_URL: process.env.DATABASE_URL, NODE_ENV: "test", ACQUIRER_FAILURE_RATE: "0", ACQUIRER_LATENCY_MIN_MS: "0", ACQUIRER_LATENCY_MAX_MS: "1" });
+test.after(() => pool.end());
+async function authorization() {
+  const merchantId = (await pool.query<{ id: string }>(`INSERT INTO merchants (display_name,mdr_bps) VALUES ($1,250) RETURNING id`, [randomUUID()])).rows[0]!.id;
+  await recordKycReview(pool, { merchantId, outcome: "approved", reviewerIdentifier: "independent QA" });
+  const real = createAcquirerSimulator(config);
+  const authorized = await authorizeTransaction(pool, real, { merchantId, amountFils: toFils(1000), card: { pan: "4242424242424242", expiryMonth: 12, expiryYear: 2030, cvv: "123" }, idempotencyKey: randomUUID(), actor: { type: "system" } });
+  assert.equal(authorized.statusCode,201);
+  return {merchantId, transactionId: (authorized.body as {id:string}).id, real};
+}
+
+test("unknown capture blocks a different client key from creating another provider effect", async () => {
+  const fixture = await authorization();
+  const effects = new Set<string>();
+  const acquirer = { ...fixture.real, async capture(req: Parameters<typeof fixture.real.capture>[0]) {
+    effects.add(req.idempotencyKey);
+    const result = await fixture.real.capture(req);
+    if (effects.size === 1) throw new Error("remote approved, response lost");
+    return result;
+  } };
+  const input = { merchantId: fixture.merchantId, transactionId: fixture.transactionId, actor: {type: "system" as const,id:randomUUID()}, idempotencyKey: randomUUID() };
+  await assert.rejects(captureTransaction(pool,acquirer,input), /response lost/);
+  await captureTransaction(pool,acquirer,{...input,idempotencyKey:randomUUID()});
+  assert.equal(effects.size,1,"an uncertain earlier capture must fence competing keys");
+});
+
+test("unknown refund blocks a different client key from refunding the same captured money again", async () => {
+  const fixture = await authorization();
+  await captureTransaction(pool, fixture.real, {merchantId:fixture.merchantId,transactionId:fixture.transactionId,idempotencyKey:randomUUID(),actor:{type:"system",id:randomUUID()}});
+  const effects = new Set<string>();
+  const acquirer = { ...fixture.real, async refund(req: Parameters<typeof fixture.real.refund>[0]) {
+    effects.add(req.idempotencyKey);
+    const result = await fixture.real.refund(req);
+    if (effects.size === 1) throw new Error("remote approved, response lost");
+    return result;
+  } };
+  const input = {merchantId:fixture.merchantId,transactionId:fixture.transactionId,amountFils:toFils(1000),idempotencyKey:randomUUID(),actor:{type:"system" as const,id:randomUUID()}};
+  await assert.rejects(processRefund(pool,acquirer,input),/response lost/);
+  await processRefund(pool,acquirer,{...input,idempotencyKey:randomUUID()});
+  assert.equal(effects.size,1,"an uncertain earlier refund must fence competing keys");
+});
+
+test("same-key capture recovery after hold expiry records an already approved provider effect", async () => {
+  const fixture = await authorization();
+  const effects = new Set<string>(); let first = true;
+  const acquirer = { ...fixture.real, async capture(req: Parameters<typeof fixture.real.capture>[0]) {
+    effects.add(req.idempotencyKey); const result = await fixture.real.capture(req);
+    if (first) { first=false; throw new Error("remote approved, response lost"); }
+    return result;
+  } };
+  const input = {merchantId:fixture.merchantId,transactionId:fixture.transactionId,idempotencyKey:randomUUID(),actor:{type:"system" as const,id:randomUUID()}};
+  await assert.rejects(captureTransaction(pool,acquirer,input),/response lost/);
+  await pool.query(`UPDATE holds SET expires_at=now()-interval '1 second' WHERE transaction_id=$1`,[fixture.transactionId]);
+  const recovered=await captureTransaction(pool,acquirer,input);
+  assert.equal(recovered.statusCode,200,"existing provider effect must remain recoverable after local hold expires");
+  assert.equal(effects.size,1);
+});

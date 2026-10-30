@@ -1,0 +1,22 @@
+{
+  "scenario": "Create link, GET checkout, pay simulated card",
+  "limits": "API CPUQuota50% MemoryMax512MiB; local PostgreSQL unconstrained",
+  "stages": [
+    {
+      "concurrency": 64,
+      "completed": 128,
+      "elapsedMs": 15040,
+      "checkoutsPerSecond": 8.510514077186615,
+      "p50Ms": 6841.404611,
+      "p95Ms": 7258.90504,
+      "errors": {}
+    }
+  ],
+  "integrity": {
+    "paid_links": "128",
+    "captured_transactions": "128",
+    "unbalanced_groups": "0",
+    "cached_payable": "124800",
+    "ledger_payable": "124800"
+  }
+}

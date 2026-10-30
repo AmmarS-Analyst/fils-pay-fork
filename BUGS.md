@@ -1,3 +1,5 @@
+> Historical submission report at `fd8f395`. Current verification, corrections, actual test results and unresolved items: [verification checkpoint](docs/verification/VERIFICATION_20261030.md).
+
 # FilsPay audit: bug report
 
 Team: AmmarS-Analyst · Branch: `submission` · One commit per bug (see `git log`; each commit message says what changed and why)

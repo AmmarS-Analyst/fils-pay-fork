@@ -52,7 +52,7 @@ Real PostgreSQL on isolated `filspay_go_review` at local port 55439, never the r
 - Additional March PostgreSQL integration test: 3/3 script tests passed, including two simultaneous sweeps of a cross-month partial capture; exactly one 9-fil correction group at Bahrain March end.
 - Added Go regressions cover invalid split totals without posting, closed-recalculate/pay/recalculate idempotence, immutable capture fee after changed terms, rebuild/close/payout cache consistency, rebuild waiting for uncommitted journal cache delta, and monitoring above float32 precision.
 
-## Explicit remaining work
+## Remaining work at the first checkpoint (superseded by 0085 below)
 
 Ordinary settlement still does not claim manual credits, journaled manual adjustments, or paid-batch MDR ledger corrections into a future payout. Its unbatched capture selection still requires the exact batch business date, so a capture committed after that day's close can remain stranded. These are confirmed preexisting settlement coverage gaps, not corrected by cache maintenance. Including them requires a durable claim contract for journal-only adjustments and a reconciliation attribution rule for carry-forward activity. Root review owns the decision on expanding this checkpoint; no payment/deployment state was changed by this review.
 

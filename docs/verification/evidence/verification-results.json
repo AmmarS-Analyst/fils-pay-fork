@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-30",
+  "branch": "verify/submission-audit",
+  "submissionBaseline": "fd8f395",
+  "workspaceSuites": {
+    "api": {
+      "tests": 454,
+      "pass": 454,
+      "fail": 0,
+      "skipped": 0
+    },
+    "reporting": {
+      "tests": 15,
+      "pass": 15,
+      "fail": 0,
+      "skipped": 0
+    },
+    "money": {
+      "tests": 40,
+      "pass": 40,
+      "fail": 0,
+      "skipped": 0
+    },
+    "events": {
+      "tests": 4,
+      "pass": 4,
+      "fail": 0,
+      "skipped": 0
+    },
+    "web": {
+      "tests": 8,
+      "pass": 8,
+      "fail": 0,
+      "skipped": 0
+    },
+    "scripts": {
+      "tests": 9,
+      "pass": 9,
+      "fail": 0,
+      "skipped": 0
+    },
+    "seed": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "go": {
+    "counts": {
+      "pass": 104,
+      "fail": 2,
+      "skip": 1
+    },
+    "failed": [
+      "TestCloseBatch_EligibleEventSelection",
+      "TestCloseBatch_CarriesRefundForwardWhenPayoutWouldGoNegative"
+    ],
+    "skipped": [
+      "TestEffectiveMdrBpsAt_SeededScheduleFixture"
+    ]
+  },
+  "typescript": "passed",
+  "webBuild": "passed",
+  "adminBuild": "passed",
+  "migrations": 80,
+  "browserChecks": 18,
+  "browserUncaughtErrors": 0,
+  "browser5xx": 0,
+  "measuredViewportOverflow": 0,
+  "npmAudit": {
+    "info": 0,
+    "low": 0,
+    "moderate": 3,
+    "high": 1,
+    "critical": 0,
+    "total": 4
+  },
+  "apiResourceConstraints": {
+    "CPUQuotaPerSecUSec": "500ms",
+    "MemoryMaxBytes": 536870912,
+    "memoryPeakBytesBeforeManualRestart": 56725504,
+    "allServicesConstrained": false
+  },
+  "liveServerRestart": {
+    "healthz": "ok",
+    "readyz": "ready",
+    "type": "manual graceful restart after drained load; no in-flight crash claim"
+  }
+}
