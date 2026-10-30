@@ -138,6 +138,18 @@ export async function captureTransaction(
       return { statusCode: 409, body };
     }
 
+    // An authorization only lasts as long as its hold (7 days for card-not-present).
+    // Capture never looked at the hold, so an expired or released one was captured anyway.
+    const hold = await client.query(
+      `SELECT 1 FROM holds WHERE transaction_id = $1 AND status = 'active' AND expires_at > now() LIMIT 1`,
+      [txn.id],
+    );
+    if (!hold.rows[0]) {
+      const body = { error: "authorization_expired" };
+      await completeIdempotencyKey(client, claim.row.id, { statusCode: 409, body });
+      return { statusCode: 409, body };
+    }
+
     // — YA: authorised vs captured. finance says "amount" and means both.
     const amountAuthorized = toFils(Number(txn.amount_fils));
     const capturedSoFar = toFils(Number(txn.captured_fils));

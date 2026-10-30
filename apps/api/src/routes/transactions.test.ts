@@ -286,6 +286,18 @@ test("GET /v1/transactions/:id/events returns the timeline in chronological orde
   assert.equal(events[2]!.amountFils, 4_000);
 });
 
+test("capture is refused once the authorization hold has expired", async () => {
+  const { rawKey } = await createApprovedMerchantWithApiKey("expired-hold");
+  const txn = await authorize(rawKey, 5_000);
+  await pool.query(`UPDATE holds SET expires_at = now() - interval '1 minute' WHERE transaction_id = $1`, [txn.id]);
+
+  const res = await capture(rawKey, txn.id);
+  assert.equal(res.statusCode, 409, res.body);
+  assert.equal(res.json().error, "authorization_expired");
+  const row = await pool.query<{ captured_fils: string }>(`SELECT captured_fils FROM transactions WHERE id = $1`, [txn.id]);
+  assert.equal(Number(row.rows[0]!.captured_fils), 0);
+});
+
 // ------------------------------------------------------------ FP-300 refunds
 
 async function refund(rawKey: string, body: Record<string, unknown>, idempotencyKey: string = randomUUID()) {
