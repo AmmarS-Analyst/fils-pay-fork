@@ -94,6 +94,34 @@ func TestRebuildMerchantBalance_MatchesDirectSummation(t *testing.T) {
 	}
 }
 
+// The per-merchant rebuild must save what it computes, not just print it.
+func TestRebuildMerchantBalance_WritesTheCache(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	merchantID := insertActiveMerchant(t, pool)
+	postLedgerLeg(t, pool, merchantID, "credit", 12000)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO merchant_balances (merchant_id, cached_payable_fils, updated_at)
+		VALUES ($1, 999999, now())
+		ON CONFLICT (merchant_id) DO UPDATE SET cached_payable_fils = 999999
+	`, merchantID); err != nil {
+		t.Fatalf("seed drifted cache: %v", err)
+	}
+
+	got, err := RebuildMerchantBalance(ctx, pool, merchantID)
+	if err != nil {
+		t.Fatalf("RebuildMerchantBalance: %v", err)
+	}
+	var persisted int64
+	if err := pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`, merchantID).Scan(&persisted); err != nil {
+		t.Fatalf("read cache: %v", err)
+	}
+	if int64(got) != 12000 || persisted != 12000 {
+		t.Errorf("rebuilt = %d, persisted cache = %d, want both 12000", got, persisted)
+	}
+}
+
 func TestRebuildMerchantBalance_ZeroActivity(t *testing.T) {
 	pool := mustPool(t)
 	merchantID := insertActiveMerchant(t, pool)
