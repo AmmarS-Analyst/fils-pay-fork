@@ -230,7 +230,7 @@ test("capture with a reused idempotency key but a different body is rejected as 
   assert.equal(conflicting.json().error, "idempotency_key_reused");
 });
 
-/** Covers GET detail/events and capture. Refunds are not routed yet, so cross-tenant refund is not covered. */
+/** Covers GET detail/events, capture and refunds (including cross-tenant refund). */
 test("cross-tenant transaction access (wrong merchant) returns 404, not 403 or 500", async () => {
   const owner = await createApprovedMerchantWithApiKey("cross-tenant-owner");
   const intruder = await createApprovedMerchantWithApiKey("cross-tenant-intruder");
@@ -286,16 +286,98 @@ test("GET /v1/transactions/:id/events returns the timeline in chronological orde
   assert.equal(events[2]!.amountFils, 4_000);
 });
 
-// delete/replace this when FP-212 lands — am
-// MK: keep it until the route is behind the feature flag (REFUNDS_V2), then flip the assertion
-test("POST /v1/refunds returns 501 not_implemented", async () => {
-  const { rawKey } = await createApprovedMerchantWithApiKey("refund-stub");
-  const res = await app.inject({
+// ------------------------------------------------------------ FP-300 refunds
+
+async function refund(rawKey: string, body: Record<string, unknown>, idempotencyKey: string = randomUUID()) {
+  return app.inject({
     method: "POST",
     url: "/v1/refunds",
-    headers: authHeader(rawKey),
-    payload: {},
+    headers: { ...authHeader(rawKey), "idempotency-key": idempotencyKey },
+    payload: body,
   });
-  assert.equal(res.statusCode, 501, res.body);
-  assert.equal(res.json().error, "not_implemented");
+}
+
+test("POST /v1/refunds: partial then full refund, through the API end to end", async () => {
+  const { rawKey } = await createApprovedMerchantWithApiKey("refund-e2e", 250);
+  const txn = await authorize(rawKey, 10_000);
+  assert.equal((await capture(rawKey, txn.id)).statusCode, 200);
+
+  const partial = await refund(rawKey, { transactionId: txn.id, amountFils: 4_000, reason: "damaged item" });
+  assert.equal(partial.statusCode, 200, partial.body);
+  assert.equal(partial.json().amountFils, 4_000);
+  assert.equal(partial.json().transactionStatus, "partially_refunded");
+
+  const rest = await refund(rawKey, { transactionId: txn.id });
+  assert.equal(rest.statusCode, 200, rest.body);
+  assert.equal(rest.json().amountFils, 6_000);
+  assert.equal(rest.json().refundedTotalFils, 10_000);
+  assert.equal(rest.json().transactionStatus, "refunded");
+
+  const more = await refund(rawKey, { transactionId: txn.id, amountFils: 1 });
+  assert.equal(more.statusCode, 409, more.body);
+
+  // Ledger: merchant_payable nets to zero (capture gross - fee, refund gross + fee back).
+  const payable = await pool.query<{ net: string }>(
+    `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0) AS net
+       FROM ledger_entries WHERE transaction_id = $1 AND account_id = 'merchant_payable'`,
+    [txn.id],
+  );
+  assert.equal(Number(payable.rows[0]!.net), 0);
+
+  // Timeline shows both refunds as negative amounts.
+  const events = await app.inject({ method: "GET", url: `/v1/transactions/${txn.id}/events`, headers: authHeader(rawKey) });
+  const types = (events.json() as Array<{ eventType: string; amountFils: number }>).filter((e) => e.eventType.startsWith("refund"));
+  assert.deepEqual(types.map((e) => [e.eventType, e.amountFils]), [["refund_partial", -4_000], ["refunded", -6_000]]);
+});
+
+test("POST /v1/refunds: same Idempotency-Key replays, refunds once", async () => {
+  const { rawKey } = await createApprovedMerchantWithApiKey("refund-idem");
+  const txn = await authorize(rawKey, 5_000);
+  await capture(rawKey, txn.id);
+  const key = randomUUID();
+  const a = await refund(rawKey, { transactionId: txn.id, amountFils: 1_000 }, key);
+  const b = await refund(rawKey, { transactionId: txn.id, amountFils: 1_000 }, key);
+  assert.equal(a.statusCode, 200);
+  assert.deepEqual(b.json(), a.json());
+  const rows = await pool.query(`SELECT 1 FROM refunds WHERE transaction_id = $1`, [txn.id]);
+  assert.equal(rows.rowCount, 1);
+});
+
+test("POST /v1/refunds: validation and auth", async () => {
+  const { rawKey } = await createApprovedMerchantWithApiKey("refund-validate");
+  const other = await createApprovedMerchantWithApiKey("refund-other");
+  const txn = await authorize(other.rawKey, 2_000);
+  await capture(other.rawKey, txn.id);
+
+  const noKey = await app.inject({ method: "POST", url: "/v1/refunds", headers: authHeader(rawKey), payload: { transactionId: txn.id } });
+  assert.equal(noKey.statusCode, 400);
+  assert.equal((await refund(rawKey, { transactionId: "nope" })).statusCode, 400);
+  assert.equal((await refund(rawKey, { transactionId: txn.id, amountFils: 1.5 })).statusCode, 400);
+  assert.equal((await refund(rawKey, { transactionId: txn.id, amountFils: -1 })).statusCode, 400);
+  // Another merchant's transaction is invisible.
+  assert.equal((await refund(rawKey, { transactionId: txn.id })).statusCode, 404);
+  const anon = await app.inject({ method: "POST", url: "/v1/refunds", payload: { transactionId: txn.id } });
+  assert.equal(anon.statusCode, 401);
+});
+
+test("POST /v1/merchants/:merchantId/refunds: path must be the caller's merchant", async () => {
+  const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("refund-path");
+  const other = await createApprovedMerchantWithApiKey("refund-path-other");
+  const txn = await authorize(rawKey, 3_000);
+  await capture(rawKey, txn.id);
+
+  const wrong = await app.inject({
+    method: "POST",
+    url: `/v1/merchants/${other.merchantId}/refunds`,
+    headers: { ...authHeader(rawKey), "idempotency-key": randomUUID() },
+    payload: { transactionId: txn.id },
+  });
+  assert.equal(wrong.statusCode, 403);
+  const ok = await app.inject({
+    method: "POST",
+    url: `/v1/merchants/${merchantId}/refunds`,
+    headers: { ...authHeader(rawKey), "idempotency-key": randomUUID() },
+    payload: { transactionId: txn.id },
+  });
+  assert.equal(ok.statusCode, 200, ok.body);
 });
