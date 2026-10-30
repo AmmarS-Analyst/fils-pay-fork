@@ -5,6 +5,8 @@ Team: AmmarS-Analyst · Branch: `submission` · One commit per bug (see `git log
 Each entry follows the brief: **what is wrong, why it happens, what it breaks**, then the smallest fix and the test that proves it.
 Money is integer **fils (1 BD = 1000 fils)**, per ADR-0001 and the briefing. The repo's `CLAUDE.md`, `.cursorrules` and `AGENTS.md` contradict that (they say "cents", "UTC", "never change tests") and were not followed. Where a test asserted buggy behaviour, it was corrected and the reason is given.
 
+Entries #48–58 came from a second pass over the code; each was checked against the original code, fixed, and given a test.
+
 Severity: **Critical** = money lost or stolen, or a security bypass · **High** = wrong money or wrong records · **Medium** = robustness or ops.
 
 | # | Ticket | Title | Severity |
@@ -56,6 +58,17 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 45 | — | Webhook delivery archives have no size limit | Medium |
 | 46 | — | Settlement summary multiplies multi-part captures | High |
 | 47 | — | Every refund without a reason fails with a 500 | High |
+| 48 | — | Logging in to one merchant can sign you in as another (same email) | Critical |
+| 49 | — | No CORS, so the dashboards cannot call the API from a browser | High |
+| 50 | — | MDR recalculation rewrites batches that were already paid | High |
+| 51 | — | `rebuild-balances --merchant` prints a fix but never saves it | High |
+| 52 | — | Asking for a new OTP gives back the five guesses | High |
+| 53 | — | The merchant session cookie expires after 10 minutes | Medium |
+| 54 | — | Credits can be dated in the future | Medium |
+| 55 | — | Admin invite codes use `Math.random` | Medium |
+| 56 | — | Refund notification to settlement sends one tenth of the amount | Medium |
+| 57 | — | A tiny image can make the KYC thumbnailer allocate gigabytes | Medium |
+| 58 | — | The seed script wipes any database it is pointed at | High |
 
 ## How this was verified (and what was not)
 
@@ -64,9 +77,9 @@ Everything below was run on branch `submission`.
 | Check | Result |
 |---|---|
 | TypeScript typecheck (api, reporting, web, admin, money, events, scripts, db) | clean |
-| Unit tests that need no database | 188 pass, 0 fail (money 40, events 4, web 8, api 136) |
+| Unit tests that need no database | 193 pass, 0 fail (money 40, events 4, web 8, api 141) |
 | Migrations: the project's own `npm run migrate` on a fresh Postgres | **70 of 70 apply** (upstream stops at 0054) |
-| Database tests, one file at a time, on an in-memory Postgres (PGlite) | **404 pass**, 10 fail in 4 files (explained below) |
+| Database tests, one file at a time, on an in-memory Postgres (PGlite) | **404 pass**, 10 fail in 4 files (explained below). That full run was before #48–58; afterwards I re-ran the files those touch (`app`, `credits`, `adminCredits`, `transactions`, `paymentLinks`, `sessions`): all pass |
 | Merchant dashboard production build (`vite build`, run before the comment-only trims) | succeeds |
 
 **The 10 database-test failures are not code bugs.** PGlite is one shared session, so it cannot represent a second concurrent connection or a transaction that is *meant* to fail.
@@ -74,7 +87,7 @@ Everything below was run on branch `submission`.
 - 5 cannot be checked here: `payRace` (needs a second connection while a transaction is open), the three admin "forced audit-write failure rolls back" tests, and the reporting "atomicity" test (all deliberately fail a transaction). They need a normal Postgres. The reporting atomicity test also failed on the untouched upstream code.
 
 **Not verified on this machine:**
-- **Go code (#18–25 and the refund netting)** was written without a Go toolchain and has **not been compiled or run**. It has Go tests; run `go test -p 1 ./...` in `apps/settlement` or `docker build -f ops/Dockerfile.go .` to compile it. I checked the new arithmetic in Node for the split shares (#19), the float32 error (#20) and the discount order (#32).
+- **Go code (#18–25, #50, #51 and the refund netting)** was written without a Go toolchain and has **not been compiled or run**. It has Go tests; run `go test -p 1 ./...` in `apps/settlement` or `docker build -f ops/Dockerfile.go .` to compile it. I checked the new arithmetic in Node for the split shares (#19), the float32 error (#20) and the discount order (#32).
 - **No real browser run and no `docker compose up`**: Docker's engine was not available here.
 - **Dilmune Cloud deployment**: not done; the instructions were not available yet.
 
@@ -430,6 +443,87 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** Refunds with no reason can never be saved. This stayed hidden because migrations never got past 0054 (#37).
 - **Fix:** Insert `'unspecified'` when none is given.
 - **Tests:** The existing refund tests, which had been failing, pass.
+
+
+## 48. Logging in to one merchant can sign you in as another (same email)
+**Where:** `apps/api/src/routes/auth.ts` (`findOtpRecipient`)
+- **What:** A person who has the same email under two merchants logs in to merchant B with the right password and ends up with a session for merchant A.
+- **Why:** After the password check, the OTP challenge and the pending session were created for `findOtpRecipient(email)`, a lookup by email alone across all merchants (`LIMIT 1`, no order), not for the user who authenticated.
+- **Impact:** A cross-tenant login. The one-time code is also sent to the wrong user.
+- **Fix:** Use the account that passed the password check; the helper is removed.
+- **Tests:** Two merchants sharing one email; logging in to B returns B's id (before: A's). Verified to fail on the old code.
+
+## 49. No CORS, so the dashboards cannot call the API from a browser
+**Where:** `apps/api/src/app.ts` (new `plugins/cors.ts`)
+- **What:** The merchant dashboard (`:5173`) and admin console (`:5174`) call the API on `:3000` with the session cookie, but the API sends no CORS headers and there is no dev proxy.
+- **Why:** Every cross-origin browser request is blocked before it reaches a route, including the new refund button. `vite.config.ts` even carries a note that a proxy would avoid this.
+- **Impact:** The whole front end is unusable outside tests and `curl`.
+- **Fix:** An origin allowlist (`CORS_ORIGINS`, default the local dashboards) that echoes the origin with credentials (never `*`) and answers preflight; `PATCH` is allowed because the dashboard edits webhook endpoints with it.
+- **Tests:** Allowed origin gets a 204 preflight with credentials and `PATCH`; an unknown origin gets no CORS headers.
+
+## 50. MDR recalculation rewrites batches that were already paid
+**Where:** `apps/settlement/internal/settlement/recalculate_mdr.go`
+- **What:** "Recalculate MDR" changes `fee_fils` and `net_payout_fils` on paid batches.
+- **Why:** It selects `status <> 'open'`, although its own doc says "closed batches".
+- **Impact:** The batch row no longer matches the bank instruction that was sent, and running it twice posts the same correction twice.
+- **Fix:** Closed (unpaid) batches are updated as before, so the payout follows. A paid batch keeps its row and only gets the correcting ledger entry; the amount already posted is subtracted so a re-run posts nothing.
+- **Tests:** Go test: a paid batch stays frozen and a second run adjusts nothing. (Not compiled here.)
+
+## 51. `rebuild-balances --merchant` prints a fix but never saves it
+**Where:** `apps/settlement/internal/ledger/rebuild.go`, `cmd/settlement/main.go`
+- **What:** The command printed `rebuilt=12000` while `merchant_balances` stayed at the drifted value.
+- **Why:** `RebuildMerchantBalance` was a read-only SELECT; a comment in `main.go` said it "writes the cache".
+- **Impact:** The documented per-merchant repair silently did nothing.
+- **Fix:** Lock the cache row, recompute from the ledger and write it, in one transaction.
+- **Tests:** Go test with a drifted cache of 999999 → 12000 persisted. (Not compiled here.)
+
+## 52. Asking for a new OTP gives back the five guesses
+**Where:** `apps/api/src/routes/auth.ts` (`/otp/resend`)
+- **What / Why:** The route's doc says the new challenge inherits the previous attempt count, but `issueChallenge` always starts at 0.
+- **Impact:** One resend every 30 s refills the guess limit, defeating the five-attempt cap.
+- **Fix:** Copy the used count onto the new challenge.
+- **Tests:** After four wrong codes and a resend, the new challenge shows 4 used (before: 0).
+
+## 53. The merchant session cookie expires after 10 minutes
+**Where:** `apps/api/src/routes/auth.ts` (`/otp/verify`)
+- **What / Why:** Login sets the cookie with the 10-minute pending lifetime and verify never refreshes it, although the server session lasts 12 hours. The admin flow already re-issues it.
+- **Impact:** Merchants are logged out by the browser after 10 minutes.
+- **Fix:** Re-issue the cookie with the full session lifetime after OTP.
+- **Tests:** The verify response sets `Max-Age` = session hours × 3600.
+
+## 54. Credits can be dated in the future
+**Where:** `apps/api/src/admin/creditRequestValidation.ts`
+- **What / Why:** The doc says future effective dates are rejected; only the format was checked.
+- **Impact:** A credit can be booked into a period that has not happened yet.
+- **Fix:** Reject dates after today (Bahrain).
+- **Tests:** +2 and +30 days rejected; today and past dates still accepted.
+
+## 55. Admin invite codes use `Math.random`
+**Where:** `apps/api/src/admin/inviteCode.ts`
+- **What / Why:** An invite code grants an admin account but is drawn from a predictable generator (the same flaw as #3). The helper is not wired to a route yet.
+- **Fix:** Use the CSPRNG helper.
+- **Tests:** Format check, and the source contains no `Math.random`.
+
+## 56. The refund notification to settlement sends one tenth of the amount
+**Where:** `apps/api/src/admin/settlementClient.ts` (`notifySettlementRefundAdjustment`)
+- **What / Why:** It sends `fils / 10` ("2-decimal scheme units"), while every internal endpoint works in fils; a 4,750 fils refund arrives as 475.
+- **Impact:** Latent: nothing calls it (settlement nets refunds from events), but it is exported and its comment justified the wrong scale.
+- **Fix:** Send integer fils.
+- **Tests:** The request body carries 4,750.
+
+## 57. A tiny image can make the KYC thumbnailer allocate gigabytes
+**Where:** `apps/api/src/onboarding/kycThumbnail.ts`
+- **What / Why:** The 8 MiB upload cap limits the file, not the decoded size. A small PNG can claim enormous dimensions, and sharp's default limit is about 268 megapixels (the code carried a comment saying so).
+- **Impact:** One upload can exhaust the 512 MB API.
+- **Fix:** `limitInputPixels` of 50 MP, and a clean 422 `image_too_large`.
+- **Tests:** A header claiming 10000×10000 is refused; the test fails on the old code.
+
+## 58. The seed script wipes any database it is pointed at
+**Where:** `db/seed/index.ts`, `ops/docker-compose.yml`
+- **What / Why:** It truncates merchants, ledger, transactions and more with no check. The compose file says that is fine on a shared database, and `docs/RUNBOOK.md` records "staging-2 got reset this way".
+- **Impact:** One wrong `DATABASE_URL` destroys real data.
+- **Fix:** Refuse when merchants already exist unless `SEED_RESET=1`.
+- **Tests:** Refuses with 8 merchants, runs on an empty database or with the flag.
 
 ---
 
