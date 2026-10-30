@@ -248,8 +248,9 @@ export async function listBatchTransactions(
 
 /**
  * gapFils = ledgerMerchantPayableNetFils - settlementNetPayoutFils -
- * pendingUnbatchedFils. Refund legs are included both in the ledger figure
- * and in pending, so a period with refunds still explains to zero.
+ * pendingUnbatchedFils. Batched refunds are netted into their batch's payout
+ * (CloseBatch); unbatched ones are in pending, so a period with refunds still
+ * explains to zero.
  */
 export interface ReconciliationReport {
   periodFrom: string;
@@ -300,11 +301,14 @@ export async function getReconciliationReport(
           AND status IN ('closed', 'paid')`,
       [input.merchantId, input.from, input.to],
     ),
-    pool.query<{ amount_fils: string | number }>(
-      `SELECT te.amount_fils
+    pool.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number }>(
+      `SELECT te.amount_fils,
+              te.event_type IN ('refunded', 'refund_partial') AS is_refund,
+              COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils
          FROM transaction_events te
          JOIN transactions t ON t.id = te.transaction_id
-        WHERE t.merchant_id = $1 AND te.event_type IN ('captured', 'partially_captured')
+        WHERE t.merchant_id = $1
+          AND te.event_type IN ('captured', 'partially_captured', 'refunded', 'refund_partial')
           AND te.settlement_batch_id IS NULL
           AND te.occurred_at >= $2 AND te.occurred_at < $3`,
       [input.merchantId, windowStart, windowEnd],
@@ -324,6 +328,11 @@ export async function getReconciliationReport(
   let pendingUnbatchedFils = 0;
   for (const row of pendingResult.rows) {
     const amountFils = Number(row.amount_fils);
+    if (row.is_refund) {
+      // Negative gross, plus the fee it handed back, exactly as journaled.
+      pendingUnbatchedFils += amountFils + Number(row.fee_reversed_fils);
+      continue;
+    }
     const feeFils = estimateFeeFils(amountFils, mdrBps, discountBps);
     pendingUnbatchedFils += amountFils - feeFils;
   }

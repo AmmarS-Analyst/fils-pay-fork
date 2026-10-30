@@ -412,6 +412,32 @@ test("GET /v1/settlement/reconciliation with an unbatched capture reports it as 
   assert.equal(report.explained, true);
 });
 
+test("FP-300: an unbatched refund is in pendingUnbatchedFils, so reconciliation still explains to zero", async () => {
+  const { rawKey } = await createApprovedMerchantWithApiKey("reconciliation-refund", 250);
+  const txn = await authorize(rawKey, 8_000);
+  await capture(rawKey, txn.id);
+  const refundRes = await app.inject({
+    method: "POST",
+    url: "/v1/refunds",
+    headers: { ...authHeader(rawKey), "idempotency-key": randomUUID() },
+    payload: { transactionId: txn.id, amountFils: 3_000 },
+  });
+  assert.equal(refundRes.statusCode, 200, refundRes.body);
+
+  const businessDate = todayBahrainDateString();
+  const res = await app.inject({
+    method: "GET",
+    url: `/v1/settlement/reconciliation?from=${businessDate}&to=${addOneCalendarDay(businessDate)}`,
+    headers: authHeader(rawKey),
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const report = res.json() as { gapFils: number; pendingUnbatchedFils: number };
+  const fee = Number(applyRateFils(toFils(8_000), 250));
+  const feeReversed = (refundRes.json() as { feeReversedFils: number }).feeReversedFils;
+  assert.equal(report.pendingUnbatchedFils, 8_000 - fee - (3_000 - feeReversed));
+  assert.equal(report.gapFils, 0);
+});
+
 test("GET /v1/settlement/summary sums captured amounts for transactions with a single capture event", async () => {
   const { rawKey } = await createApprovedMerchantWithApiKey("summary-single-event", 250);
   const txn1 = await authorize(rawKey, 10_000);
