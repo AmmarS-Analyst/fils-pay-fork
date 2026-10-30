@@ -21,3 +21,8 @@ test("CORS origins default to the local dashboards, and an empty value does not 
     "https://b.example",
   ]);
 });
+
+test("the in-flight payment cap follows the pool size unless set", () => {
+  assert.equal(loadConfig({ ...BASE, PG_POOL_MAX: "10" }).maxInflightPayments, 20);
+  assert.equal(loadConfig({ ...BASE, MAX_INFLIGHT_PAYMENTS: "7" }).maxInflightPayments, 7);
+});

@@ -42,6 +42,8 @@ export interface Config {
   /** True when the API sits behind our own reverse proxy (hosted setup), so the
    *  client address comes from X-Forwarded-For. Never set it when the API is exposed directly. */
   trustProxy: boolean;
+  /** Max payment writes in flight before the API answers 503. 0 turns the guard off. */
+  maxInflightPayments: number;
   cookieSecure: boolean;
 
   /** Cookie carrying an `admin_sessions` token. A completely separate name,
@@ -233,6 +235,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
     cookieName: env.COOKIE_NAME ?? "fp_sid",
     trustProxy: parseBoolEnv(env.TRUST_PROXY, false),
+    maxInflightPayments: parseIntEnv(env.MAX_INFLIGHT_PAYMENTS, parseIntEnv(env.PG_POOL_MAX, 5) * 2),
     corsOrigins: (env.CORS_ORIGINS || "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174")
       .split(",")
       .map((o) => o.trim())

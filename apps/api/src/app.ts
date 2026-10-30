@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { createAcquirerSimulator } from "./acquirer/simulator.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { registerCors } from "./plugins/cors.js";
+import { registerOverloadGuard } from "./plugins/overload.js";
 import { multipartPlugin } from "./plugins/multipart.js";
 import { errorHandler } from "./plugins/errorHandler.js";
 import { healthRoutes } from "./routes/health.js";
@@ -48,6 +49,7 @@ export function buildApp(config: Config, pool: Pool, options: BuildAppOptions = 
   app.decorate("webhookTransport", options.webhookTransport ?? createFetchTransport());
 
   registerCors(app, config.corsOrigins);
+  registerOverloadGuard(app, config.maxInflightPayments);
   app.register(cookiesPlugin);
   app.register(multipartPlugin, { config });
   app.setErrorHandler(errorHandler);
