@@ -39,6 +39,9 @@ export interface Config {
   cookieName: string;
   /** Browser origins allowed to call the API with credentials (the dashboards). */
   corsOrigins: string[];
+  /** True when the API sits behind our own reverse proxy (hosted setup), so the
+   *  client address comes from X-Forwarded-For. Never set it when the API is exposed directly. */
+  trustProxy: boolean;
   cookieSecure: boolean;
 
   /** Cookie carrying an `admin_sessions` token. A completely separate name,
@@ -229,6 +232,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : null,
 
     cookieName: env.COOKIE_NAME ?? "fp_sid",
+    trustProxy: parseBoolEnv(env.TRUST_PROXY, false),
     corsOrigins: (env.CORS_ORIGINS || "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174")
       .split(",")
       .map((o) => o.trim())
