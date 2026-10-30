@@ -374,3 +374,20 @@ test(
     assert.equal(finalLink.rows[0]!.transaction_id, txnId);
   },
 );
+
+test("a payment-link capture gets the merchant's negotiated discount, like a direct capture", async () => {
+  const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("paylink-discount");
+  await pool.query(`UPDATE merchants SET negotiated_discount_bps = 2000 WHERE id = $1`, [merchantId]);
+  const link = await createLink(rawKey, merchantId, { amountFils: 10_000 });
+
+  const payRes = await pay(link.token, APPROVED_CARD);
+  assert.equal(payRes.statusCode, 200, payRes.body);
+
+  // 2.5% of 10.000 BD = 250 fils, minus a 20% discount = 200 fils net fee.
+  const fee = await pool.query<{ net: string }>(
+    `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0) AS net
+       FROM ledger_entries WHERE transaction_id = $1 AND account_id = 'platform_fee_revenue'`,
+    [payRes.json().transactionId],
+  );
+  assert.equal(Number(fee.rows[0]!.net), 200);
+});
