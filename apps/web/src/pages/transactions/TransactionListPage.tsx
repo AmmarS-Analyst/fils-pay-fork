@@ -1,5 +1,7 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import { listTransactions } from "../../api/transactions.js";
 import { describeError } from "../../api/client.js";
 import { Pagination } from "../../components/Pagination.js";
@@ -101,18 +103,8 @@ export function TransactionListPage() {
 
       <fieldset className="dash-filters">
         <legend>Filter</legend>
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          {/* Exclusive, because the endpoint's own predicate is
-              `occurred_at < to` — labelled rather than quietly shifted by a
-              day here, which would make this page and the API disagree about
-              what a filter means. */}
-          To (exclusive)
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+        <DateInput label="From" value={from} onValueChange={setFrom} />
+        <DateInput label="To (exclusive)" value={to} onValueChange={setTo} />
         <label>
           Search
           <input
@@ -128,43 +120,47 @@ export function TransactionListPage() {
 
       <p>{pluralize(transactions.length, "transaction")} loaded</p>
 
-      <table className="dash-table">
-        <thead>
-          <tr>
-            <th>Occurred</th>
-            <th>Reference</th>
-            <th>Status</th>
-            <th className="dash-num">Authorized</th>
-            <th className="dash-num">Captured</th>
-            <th className="dash-num">Refunded</th>
-            <th>Acquirer reference</th>
-          </tr>
-        </thead>
-        <tbody>
-          {transactions.map((txn) => (
-            <tr key={txn.id}>
-              <td>
-                <Link to={`/dashboard/transactions/${txn.id}`}>{dateTime(txn.occurredAt)}</Link>
-              </td>
-              <td>{dash(txn.reference)}</td>
-              <td>
-                <span className={classNames("dash-status", `dash-status-${txn.status}`)}>{txn.status.replace(/_/g, " ")}</span>
-              </td>
-              <td className="dash-num">{bhd(txn.amountFils)}</td>
-              <td className="dash-num">{bhd(txn.capturedFils)}</td>
-              <td className="dash-num">{txn.refundedFils > 0 ? bhd(txn.refundedFils) : "—"}</td>
-              <td>
-                <code>{truncateMiddle(txn.acquirerReference, 20)}</code>
-              </td>
-            </tr>
-          ))}
-          {transactions.length === 0 && !loading ? (
+      <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
+        <table className="dash-table">
+          <thead>
             <tr>
-              <td colSpan={7}>No transactions match these filters.</td>
+              <th>Occurred</th>
+              <th>Reference</th>
+              <th>Status</th>
+              <th className="dash-num">Authorized</th>
+              <th className="dash-num">Captured</th>
+              <th className="dash-num">Refunded</th>
+              <th>Acquirer reference</th>
+              <RowLinkHeader />
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {transactions.map((txn) => (
+              <tr key={txn.id}>
+                <td>
+                  <Link to={`/dashboard/transactions/${txn.id}`}>{dateTime(txn.occurredAt)}</Link>
+                </td>
+                <td>{dash(txn.reference)}</td>
+                <td>
+                  <span className={classNames("dash-status", `dash-status-${txn.status}`)}>{txn.status.replace(/_/g, " ")}</span>
+                </td>
+                <td className="dash-num">{bhd(txn.amountFils)}</td>
+                <td className="dash-num">{bhd(txn.capturedFils)}</td>
+                <td className="dash-num">{txn.refundedFils > 0 ? bhd(txn.refundedFils) : "—"}</td>
+                <td>
+                  <code>{truncateMiddle(txn.acquirerReference, 20)}</code>
+                </td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/transactions/${txn.id}`} label={`View transaction ${txn.reference ?? txn.id}`} /></td>
+              </tr>
+            ))}
+            {transactions.length === 0 && !loading ? (
+              <tr>
+                <td colSpan={8}>No transactions match these filters.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
 
       {loading ? <p>Loading...</p> : null}
 

@@ -227,6 +227,7 @@ export function TransactionDetailPage() {
       <RefundDrawer txn={txn} onRefunded={load} />
 
       <h2>Event timeline</h2>
+      <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
       <table className="dash-table">
         <thead>
           <tr>
@@ -261,6 +262,7 @@ export function TransactionDetailPage() {
           ) : null}
         </tbody>
       </table>
+      </div>
 
       <p>
         <Link to="/dashboard/transactions">Back to transactions</Link>

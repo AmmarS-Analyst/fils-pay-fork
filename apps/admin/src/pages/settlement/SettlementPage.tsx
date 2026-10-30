@@ -1,3 +1,4 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useState } from "react";
 import { formatBhd, toFils } from "@filspay/money";
 import { rebuildAnalytics, rebuildBalances, runBatch } from "../../api/settlement.js";
@@ -147,10 +148,7 @@ export function SettlementPage() {
         }
       >
         <form className="admin-form" onSubmit={(e) => void handleRunBatch(e)}>
-          <label>
-            Business date
-            <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
+          <DateInput label="Business date" value={date} onValueChange={setDate} required />
           <label>
             Merchant id (optional — leave blank to run every eligible merchant)
             <input
@@ -173,36 +171,38 @@ export function SettlementPage() {
             {runResults.length === 1 ? "" : "s"} processed.
           </p>
           {runResults.length > 0 ? (
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Merchant</th>
-                  <th>Batch</th>
-                  <th>Gross</th>
-                  <th>Fee</th>
-                  <th>Net payout</th>
-                  <th>Already closed</th>
-                  <th>Already paid</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runResults.map((outcome) => (
-                  <tr key={`${outcome.merchantId}-${outcome.batchId}`}>
-                    <td>
-                      <code>{outcome.merchantId}</code>
-                    </td>
-                    <td>
-                      <code>{outcome.batchId}</code>
-                    </td>
-                    <td>{bhd(outcome.grossFils)}</td>
-                    <td>{bhd(outcome.feeFils)}</td>
-                    <td>{bhd(outcome.netPayoutFils)}</td>
-                    <td>{outcome.alreadyClosed ? "yes" : "no"}</td>
-                    <td>{outcome.alreadyPaid ? "yes" : "no"}</td>
+            <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Merchant</th>
+                    <th>Batch</th>
+                    <th>Gross</th>
+                    <th>Fee</th>
+                    <th>Net payout</th>
+                    <th>Already closed</th>
+                    <th>Already paid</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {runResults.map((outcome) => (
+                    <tr key={`${outcome.merchantId}-${outcome.batchId}`}>
+                      <td>
+                        <code>{outcome.merchantId}</code>
+                      </td>
+                      <td>
+                        <code>{outcome.batchId}</code>
+                      </td>
+                      <td>{bhd(outcome.grossFils)}</td>
+                      <td>{bhd(outcome.feeFils)}</td>
+                      <td>{bhd(outcome.netPayoutFils)}</td>
+                      <td>{outcome.alreadyClosed ? "yes" : "no"}</td>
+                      <td>{outcome.alreadyPaid ? "yes" : "no"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -250,26 +250,28 @@ export function SettlementPage() {
             {(rebuildResult.changed ?? []).length} changed.
           </p>
           {(rebuildResult.changed ?? []).length > 0 ? (
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Merchant</th>
-                  <th>Before</th>
-                  <th>After</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(rebuildResult.changed ?? []).map((change) => (
-                  <tr key={change.merchantId}>
-                    <td>
-                      <code>{change.merchantId}</code>
-                    </td>
-                    <td>{bhd(change.before)}</td>
-                    <td>{bhd(change.after)}</td>
+            <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Merchant</th>
+                    <th>Before</th>
+                    <th>After</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(rebuildResult.changed ?? []).map((change) => (
+                    <tr key={change.merchantId}>
+                      <td>
+                        <code>{change.merchantId}</code>
+                      </td>
+                      <td>{bhd(change.before)}</td>
+                      <td>{bhd(change.after)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="admin-muted">Every cached balance already matched the ledger.</p>
           )}
@@ -345,7 +347,7 @@ export function SettlementPage() {
           </p>
         }
       >
-        <form className="admin-form" onSubmit={(e) => void handleRecalculateMdr(e)}>
+        <form className="admin-form fp-grid-form" onSubmit={(e) => void handleRecalculateMdr(e)}>
           <label>
             Merchant id
             <input
@@ -355,14 +357,8 @@ export function SettlementPage() {
               required
             />
           </label>
-          <label>
-            From (inclusive)
-            <input type="date" value={mdrFrom} onChange={(e) => setMdrFrom(e.target.value)} required />
-          </label>
-          <label>
-            To (exclusive)
-            <input type="date" value={mdrTo} onChange={(e) => setMdrTo(e.target.value)} required />
-          </label>
+          <DateInput label="From (inclusive)" value={mdrFrom} onValueChange={setMdrFrom} required />
+          <DateInput label="To (exclusive)" value={mdrTo} onValueChange={setMdrTo} required />
           <button type="submit" disabled={mdrBusy}>
             {mdrBusy ? "Recalculating…" : "Recalculate MDR"}
           </button>
@@ -378,28 +374,30 @@ export function SettlementPage() {
             change.
           </p>
           {mdrAdjusted.length > 0 ? (
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Batch date</th>
-                  <th>Status</th>
-                  <th>Old fee</th>
-                  <th>New fee</th>
-                  <th>Difference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mdrAdjusted.map((adjustment) => (
-                  <tr key={adjustment.batchId}>
-                    <td>{adjustment.batchDate}</td>
-                    <td>{adjustment.status}</td>
-                    <td>{bhd(adjustment.oldFeeFils)}</td>
-                    <td>{bhd(adjustment.newFeeFils)}</td>
-                    <td>{bhd(adjustment.diffFils)}</td>
+            <div className="fp-table-scroll" tabIndex={0} role="region" aria-label="Scrollable data table">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Batch date</th>
+                    <th>Status</th>
+                    <th>Old fee</th>
+                    <th>New fee</th>
+                    <th>Difference</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {mdrAdjusted.map((adjustment) => (
+                    <tr key={adjustment.batchId}>
+                      <td>{adjustment.batchDate}</td>
+                      <td>{adjustment.status}</td>
+                      <td>{bhd(adjustment.oldFeeFils)}</td>
+                      <td>{bhd(adjustment.newFeeFils)}</td>
+                      <td>{bhd(adjustment.diffFils)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="admin-muted">Every batch in range already matched the current rate.</p>
           )}

@@ -8,3 +8,7 @@ npm-debug.log*
 .claude/
 ops/.env
 ops/.env.prod
+
+# Local deployment SSH credentials
+/filspay.pem
+/filspaypubshhkey

@@ -3,3 +3,5 @@
 .git
 ops/.env
 ops/.env.prod
+filspay.pem
+filspaypubshhkey

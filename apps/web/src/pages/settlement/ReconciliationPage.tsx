@@ -1,3 +1,4 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { getReconciliation } from "../../api/settlement.js";
 import { ApiError, describeError } from "../../api/client.js";
@@ -88,14 +89,8 @@ export function ReconciliationPage() {
           setApplied({ from, to });
         }}
       >
-        <label>
-          From
-          <input type="date" required value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          To (exclusive)
-          <input type="date" required value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+        <DateInput label="From" value={from} onValueChange={setFrom} required />
+        <DateInput label="To (exclusive)" value={to} onValueChange={setTo} required />
         <button type="submit" className="dash-button" disabled={loading}>
           {loading ? "Loading..." : "Run report"}
         </button>

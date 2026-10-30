@@ -1,0 +1,97 @@
+{
+  "results": [
+    {
+      "name": "admin-merchant-detail",
+      "width": 320,
+      "document": 320,
+      "heading": "Alpha Retail Co",
+      "regions": [
+        {
+          "tabIndex": 0,
+          "width": 286,
+          "scroll": 844
+        },
+        {
+          "tabIndex": 0,
+          "width": 286,
+          "scroll": 572
+        },
+        {
+          "tabIndex": 0,
+          "width": 286,
+          "scroll": 493
+        }
+      ],
+      "inputs": 0
+    },
+    {
+      "name": "admin-merchant-detail",
+      "width": 768,
+      "document": 768,
+      "heading": "Alpha Retail Co",
+      "regions": [
+        {
+          "tabIndex": 0,
+          "width": 541,
+          "scroll": 844
+        },
+        {
+          "tabIndex": 0,
+          "width": 541,
+          "scroll": 572
+        },
+        {
+          "tabIndex": 0,
+          "width": 541,
+          "scroll": 541
+        }
+      ],
+      "inputs": 0
+    },
+    {
+      "name": "merchant-webhook-new",
+      "width": 320,
+      "document": 320,
+      "heading": "New webhook endpoint",
+      "regions": [],
+      "inputs": 0
+    },
+    {
+      "name": "merchant-webhook-new",
+      "width": 768,
+      "document": 768,
+      "heading": "New webhook endpoint",
+      "regions": [],
+      "inputs": 0
+    },
+    {
+      "name": "merchant-settlement-detail",
+      "width": 320,
+      "document": 320,
+      "heading": "Settlement batch 2026-09-01",
+      "regions": [
+        {
+          "tabIndex": 0,
+          "width": 286,
+          "scroll": 541
+        }
+      ],
+      "inputs": 0
+    },
+    {
+      "name": "merchant-settlement-detail",
+      "width": 768,
+      "document": 768,
+      "heading": "Settlement batch 2026-09-01",
+      "regions": [
+        {
+          "tabIndex": 0,
+          "width": 541,
+          "scroll": 541
+        }
+      ],
+      "inputs": 0
+    }
+  ],
+  "errors": []
+}

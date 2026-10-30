@@ -1,3 +1,4 @@
+import { BackLink } from "../../../../shared-ui/BackLink.js";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createWebhookEndpoint } from "../../api/webhooks.js";
@@ -100,30 +101,22 @@ export function WebhookEndpointCreatePage() {
   }
 
   return (
-    <section>
+    <section className="fp-create-page">
+      <BackLink to="/dashboard/webhooks">Back to webhook endpoints</BackLink>
       <h1>New webhook endpoint</h1>
-
-      {error ? <p className="dash-error">{error}</p> : null}
-
-      <form className="dash-form" onSubmit={(e) => void handleSubmit(e)}>
+      {error ? <p className="dash-error" role="alert">{error}</p> : null}
+      <form className="dash-form fp-create-form" onSubmit={(e) => void handleSubmit(e)}>
         <label>
           Endpoint URL
-          <input
-            type="url"
-            required
-            placeholder="https://example.com/filspay/webhooks"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
+          <input type="url" required placeholder="https://example.com/filspay/webhooks" value={url} onChange={(e) => setUrl(e.target.value)} />
         </label>
-        <button type="submit" className="dash-button" disabled={submitting}>
-          {submitting ? "Creating..." : "Create endpoint"}
-        </button>
+        <div className="fp-form-footer">
+          <Link className="dash-button-link" to="/dashboard/webhooks">Cancel</Link>
+          <button type="submit" className="dash-button" disabled={submitting}>
+            {submitting ? "Creating..." : "Create endpoint"}
+          </button>
+        </div>
       </form>
-
-      <p>
-        <Link to="/dashboard/webhooks">Back to webhook endpoints</Link>
-      </p>
     </section>
   );
 }

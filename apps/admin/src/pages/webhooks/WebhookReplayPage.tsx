@@ -1,3 +1,4 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getMerchant, listMerchants } from "../../api/merchants.js";
@@ -167,7 +168,7 @@ export function WebhookReplayPage() {
         <p className="admin-muted">This merchant has no webhook endpoints registered.</p>
       ) : null}
 
-      <form className="admin-form" onSubmit={(e) => void handleReplay(e)}>
+      <form className="admin-form fp-grid-form" onSubmit={(e) => void handleReplay(e)}>
         <label>
           Endpoint
           <select value={endpointId} onChange={(e) => setEndpointId(e.target.value)} required>
@@ -181,24 +182,8 @@ export function WebhookReplayPage() {
             ))}
           </select>
         </label>
-        <label>
-          From
-          <input
-            type="datetime-local"
-            required
-            value={range.from}
-            onChange={(e) => setRange({ ...range, from: e.target.value })}
-          />
-        </label>
-        <label>
-          To
-          <input
-            type="datetime-local"
-            required
-            value={range.to}
-            onChange={(e) => setRange({ ...range, to: e.target.value })}
-          />
-        </label>
+        <DateInput label="From" value={range.from} onValueChange={(value) => setRange({ ...range, from: value })} type="datetime-local" required />
+        <DateInput label="To" value={range.to} onValueChange={(value) => setRange({ ...range, to: value })} type="datetime-local" required />
         <fieldset className="admin-filters">
           <legend>Delivery statuses to replay</legend>
           {REPLAYABLE_STATUSES.map((status) => (

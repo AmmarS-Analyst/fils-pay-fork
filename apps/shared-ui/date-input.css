@@ -1,0 +1,16 @@
+.fp-date-control { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fp-date-control > label { color: var(--fp-secondary); font-size: 12px; font-weight: 550; }
+.fp-date-field { position: relative; display: flex; min-width: 0; width: 100%; }
+div.fp-date-control div.fp-date-field input.fp-date-text { width: 100%; min-height: 46px; padding-right: 48px; font-variant-numeric: tabular-nums; }
+.fp-date-picker { position: absolute; top: 1px; right: 1px; bottom: 1px; display: flex; align-items: center; justify-content: center; width: 45px; border-left: 1px solid var(--fp-control); border-radius: 0 5px 5px 0; color: var(--fp-secondary); background: var(--fp-raised); }
+.fp-date-picker:hover { color: #fff; background: #30353e; }
+.fp-date-picker:focus-within { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+div.fp-date-control div.fp-date-field input.fp-date-native { position: absolute; inset: 0; width: 100%; min-height: 0; height: 100%; padding: 0; margin: 0; opacity: 0; cursor: pointer; }
+.fp-date-native::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+:is(.dash-form-inline, .admin-form-inline) > .fp-date-control { flex: 0 1 220px; }
+:is(.dash-filters, .admin-filters) > .fp-date-control { flex: 0 1 210px; }
+:is(.dash-filters, .admin-filters) .fp-date-control > label { min-height: 0; }
+@media (max-width: 760px) {
+  :is(.dash-form-inline, .admin-form-inline) > .fp-date-control { flex: 1 1 160px; }
+  :is(.dash-filters, .admin-filters):has(.fp-date-control) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

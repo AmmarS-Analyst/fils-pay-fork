@@ -1,3 +1,5 @@
+import { BackLink } from "../../../../shared-ui/BackLink.js";
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createPaymentLink } from "../../api/paymentLinks.js";
@@ -69,49 +71,36 @@ export function PaymentLinkCreatePage() {
   }
 
   return (
-    <section>
+    <section className="fp-create-page">
+      <BackLink to="/dashboard/payment-links">Back to payment links</BackLink>
       <h1>New payment link</h1>
-
-      {error ? <p className="dash-error">{error}</p> : null}
-
-      <form className="dash-form" onSubmit={(e) => void handleSubmit(e)}>
-        <label>
-          Amount in fils
-          <input
-            type="number"
-            min={1}
-            step={1}
-            required
-            value={amountFils}
-            onChange={(e) => setAmountFils(e.target.value)}
-          />
-        </label>
-        <p className="dash-muted dash-hint">1000 fils = 1.000 BHD.</p>
-        <label>
-          Reference (optional)
-          <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} />
-        </label>
-        <label>
-          Description (optional)
-          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} />
-        </label>
-        <label>
-          Expires at
-          <input
-            type="datetime-local"
-            required
-            value={expiresAt}
-            onChange={(e) => setExpiresAt(e.target.value)}
-          />
-        </label>
-        <button type="submit" className="dash-button" disabled={submitting}>
-          {submitting ? "Creating..." : "Create payment link"}
-        </button>
+      {error ? <p className="dash-error" role="alert">{error}</p> : null}
+      <form className="dash-form fp-create-form" onSubmit={(e) => void handleSubmit(e)}>
+        <div className="fp-form-grid">
+          <div className="fp-form-field">
+            <label>
+              Amount in fils
+              <input type="number" min={1} step={1} required value={amountFils} onChange={(e) => setAmountFils(e.target.value)} />
+            </label>
+            <p className="dash-muted dash-hint">1000 fils = 1.000 BHD.</p>
+          </div>
+          <DateInput label="Expires at" value={expiresAt} onValueChange={setExpiresAt} type="datetime-local" required />
+          <label className="fp-form-wide">
+            Reference (optional)
+            <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} />
+          </label>
+          <label className="fp-form-wide">
+            Description (optional)
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </label>
+        </div>
+        <div className="fp-form-footer">
+          <Link className="dash-button-link" to="/dashboard/payment-links">Cancel</Link>
+          <button type="submit" className="dash-button" disabled={submitting}>
+            {submitting ? "Creating..." : "Create payment link"}
+          </button>
+        </div>
       </form>
-
-      <p>
-        <Link to="/dashboard/payment-links">Back to payment links</Link>
-      </p>
     </section>
   );
 }

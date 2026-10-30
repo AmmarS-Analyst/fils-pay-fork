@@ -8,17 +8,26 @@
 
 name: filspay
 
+# cap container logs so a long load test cannot fill the disk
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-node: &node
   build:
     context: ..
     dockerfile: ops/Dockerfile.node
   restart: unless-stopped
+  logging: *logging
   networks: [internal]
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: filspay
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ops/deploy.sh to generate secrets}
@@ -106,6 +115,7 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.go
     restart: unless-stopped
+    logging: *logging
     command: ["./settlement", "daemon"]
     environment:
       DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
@@ -138,6 +148,7 @@ services:
       args:
         PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL in ops/.env.prod}
     restart: unless-stopped
+    logging: *logging
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in ops/.env.prod}
       ADMIN_ADDRESS: ${ADMIN_ADDRESS:?set ADMIN_ADDRESS in ops/.env.prod}
