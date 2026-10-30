@@ -23,8 +23,8 @@ html, body { margin: 0; min-width: 320px; }
 *, *::before, *::after { box-sizing: border-box; }
 ::selection { color: #fff; background: #8d2330; }
 :focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 3px; }
-.fp-skip-link { position: fixed; top: -80px; left: 16px; z-index: 100; padding: 10px 16px; border-radius: 6px; background: #fff; color: #15161a; font-weight: 600; }
-.fp-skip-link:focus { top: 12px; }
+.fp-skip-link { position: absolute; top: 12px; left: 16px; z-index: 100; padding: 10px 16px; border-radius: 6px; background: #fff; color: #15161a; font-weight: 600; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; white-space: nowrap; }
+.fp-skip-link:focus-visible { clip-path: none; width: auto; height: auto; overflow: visible; }
 input, textarea { caret-color: var(--fp-focus); }
 code, pre { font-family: "SFMono-Regular", Consolas, monospace; font-size: .88em; }
 :is(.dash-shell, .admin-shell, .dash-centered, .admin-centered) {
@@ -158,3 +158,10 @@ code, pre { font-family: "SFMono-Regular", Consolas, monospace; font-size: .88em
 .fp-table-scroll { width: 100%; max-width: 100%; overflow: auto; margin: 14px 0; border: 1px solid var(--fp-line); border-radius: var(--fp-radius); }
 .fp-table-scroll :is(.dash-table, .admin-table) { margin: 0; border: 0; border-radius: 0; min-width: 100%; }
 .fp-table-scroll:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 3px; }
+
+/* status filter: the whole label toggles, the checked one stands out */
+.dash-filters label:has(> input[type="checkbox"]) { cursor: pointer; padding: 4px 10px; border: 1px solid var(--fp-line); border-radius: 6px; transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease; }
+.dash-filters label:has(> input[type="checkbox"]):hover { border-color: var(--fp-control); color: #fff; }
+.dash-filters label:has(> input[type="checkbox"]:checked) { border-color: var(--fp-red); background: rgba(216, 49, 64, .12); color: #fff; }
+/* phone nav scrolls sideways; keep it tidy */
+@media (max-width: 760px) { :is(.dash-nav, .admin-sidebar .admin-nav) { scrollbar-width: none; } :is(.dash-nav, .admin-sidebar .admin-nav)::-webkit-scrollbar { display: none; } }

@@ -1,6 +1,6 @@
 # UI/UX changes
 
-Eight small commits on `apps/web`, each with a reason. Screenshots are taken at
+Nine changes on `apps/web`, each with a reason. Screenshots are taken at
 390 px (phone) and 1100 px (desktop) with a headless Chrome against the Vite
 dev server and a stub of the payment-link API (the stub only answers the two
 checkout calls; the declined card ends in `0002`). "Before" is the code at
@@ -16,6 +16,7 @@ checkout calls; the declined card ends in `0002`). "Before" is the code at
 | 6 | `884415c` dashboard on phones | At 390 px the detail page and event table were wider than the screen and clipped the status; no visible keyboard focus; current page only bold | Detail rows stack, tables scroll inside themselves, focus ring, underline bar on the current nav item, primary submit buttons |
 | 7 | `46ea668` minimal restyle | Pages looked unfinished: browser-default controls, heavy table grid, mixed button styles | CSS only, no new elements: one neutral palette, white cards, soft status pills, quiet table headers, dark primary buttons, focus halo, short transitions; checkout as a centred card |
 | 8 | black + red theme | Team wanted a stronger identity than neutral grey | CSS only, no new elements, dashboard + checkout + admin: black (#09090b) surfaces, white text, red (#dc2626) for primary buttons, focus and the active nav item; sharp 2px corners; statuses are outlined tags (white = money moved, dashed = waiting, red = stopped). shadcn/Tailwind was considered and rejected for tonight: it means rewriting every component; the same look is achieved with plain CSS on the existing React markup |
+| 9 | `855a065` + polish (Abdu, merged `25cc0c8`) | Top-bar navigation did not scale to 6 sections on a phone; native date fields varied by browser; pages had inconsistent spacing and controls | Shared theme (`apps/shared-ui/theme.css`, Inter font): left sidebar navigation with the current section marked, phone tab bar, one `DateInput` with a calendar button and DD/MM/YYYY entry, row links with arrows, consistent cards and status pills across merchant, admin and checkout. Polish on merge: status filters as toggle chips, statuses shown as words, skip-to-content link only on keyboard focus |
 
 ## Before / after
 

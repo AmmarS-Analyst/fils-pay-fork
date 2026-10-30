@@ -96,7 +96,7 @@ export function TransactionListPage() {
               checked={statuses.includes(status)}
               onChange={() => toggleStatus(status)}
             />
-            {status}
+            {status.replace(/_/g, " ")}
           </label>
         ))}
       </fieldset>
