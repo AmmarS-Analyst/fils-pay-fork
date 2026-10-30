@@ -252,7 +252,7 @@ test("a partial refund lands on partially_refunded with a refund_partial event",
   assert.equal(events.rows[events.rows.length - 1]!.event_type, "refund_partial");
 });
 
-// am: should there be a test for two refunds at the SAME time? nvm the claim blocks it
+
 test("a second partial refund completing the captured total lands on refunded", async () => {
   const merchant = await createApprovedMerchantWithApiKey("two-partials");
   const txn = await capturedTransaction(merchant.rawKey, 10_000);
@@ -463,8 +463,8 @@ test("a successful refund enqueues exactly one refund.succeeded outbox event", a
   assert.equal(events.rows[0]!.payload.amountFils, 7_000);
 });
 
-// TODO(FH): add "another merchant's transaction answers 404" — Claude says it's covered
-// by the route test already
+
+
 test("unknown transaction ids answer 404", async () => {
   const merchant = await createApprovedMerchantWithApiKey("refund-missing");
   const actor = await apiKeyActor(merchant.merchantId);
@@ -477,4 +477,22 @@ test("unknown transaction ids answer 404", async () => {
   });
   assert.equal(result.statusCode, 404);
   assert.deepEqual(result.body, { error: "transaction_not_found" });
+});
+
+// ------------------------------------------------------------ audit fixes
+
+test("another merchant's transaction id answers 404 and refunds nothing", async () => {
+  const owner = await createApprovedMerchantWithApiKey("idor-owner");
+  const attacker = await createApprovedMerchantWithApiKey("idor-attacker");
+  const txn = await capturedTransaction(owner.rawKey, 2_000);
+
+  const result = await processRefund(pool, approvingAcquirer, {
+    transactionId: txn.id,
+    merchantId: attacker.merchantId,
+    idempotencyKey: randomUUID(),
+    actor: await apiKeyActor(attacker.merchantId),
+  });
+  assert.equal(result.statusCode, 404);
+  const refunds = await pool.query(`SELECT 1 FROM refunds WHERE transaction_id = $1`, [txn.id]);
+  assert.equal(refunds.rowCount, 0);
 });
