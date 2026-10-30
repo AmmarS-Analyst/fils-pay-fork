@@ -165,6 +165,19 @@ async function authorizeAndCapture(merchantId: string, amountFils: number, label
   return txnId;
 }
 
+test("PATCH with an invalid status is a 400, not a 500", async () => {
+  const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("bad-status");
+  const created = await createEndpointViaRoute(rawKey, merchantId, "http://localhost:9/webhook");
+  const res = await app.inject({
+    method: "PATCH",
+    url: `/v1/merchants/${merchantId}/webhook-endpoints/${created.id}`,
+    headers: authHeader(rawKey),
+    payload: { status: "paused" },
+  });
+  assert.equal(res.statusCode, 400, res.body);
+  assert.equal(res.json().error, "invalid_status");
+});
+
 test("create -> list -> patch -> delete: full CRUD lifecycle, secret shown once, never returned again", async () => {
   const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("crud");
 

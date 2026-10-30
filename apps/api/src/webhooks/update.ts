@@ -35,6 +35,11 @@ export async function updateWebhookEndpoint(
   if (input.url === undefined && input.status === undefined) {
     throw new BadRequestError("invalid_request", "at least one of url or status is required");
   }
+  // The column is CHECK (active, disabled); any other value used to reach the
+  // database and come back as a 500.
+  if (input.status !== undefined && input.status !== "active" && input.status !== "disabled") {
+    throw new BadRequestError("invalid_status", "status must be 'active' or 'disabled'");
+  }
   if (input.url !== undefined) {
     validateWebhookUrl(input.url, config);
   }
