@@ -1,8 +1,8 @@
-> Entries #1–62 and their original verification describe `fd8f395`; #63–64 were added during later hosting work. The [session fix addendum](#session-fix-addendum--30-october-2026) below records the separate, commit-verified audit fixes and current limitations. Earlier test counts and open-risk lists are historical.
+> Entries #1–62 and their original verification describe `fd8f395`; #63–64 were added during later hosting work. Session fixes are integrated into the numbered entries below, with commit and test evidence; [session verification](#session-verification-and-existing-data-effects) records the current limitations. Earlier test counts and open-risk lists are historical.
 
 # FilsPay audit: bug report
 
-Team: AmmarS-Analyst · Branch: `submission` · One commit per bug (see `git log`; each commit message says what changed and why)
+Team: AmmarS-Analyst · Branch: `submission` · Fix commits and verification are recorded with each entry.
 
 Each entry follows the brief: **what is wrong, why it happens, what it breaks**, then the smallest fix and the test that proves it.
 Money is integer **fils (1 BD = 1000 fils)**, per ADR-0001 and the briefing. The repo's `CLAUDE.md`, `.cursorrules` and `AGENTS.md` contradict that (they say "cents", "UTC", "never change tests") and were not followed. Where a test asserted buggy behaviour, it was corrected and the reason is given.
@@ -77,6 +77,21 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 62 | — | Capture ignores the authorization hold, so expired authorizations can be captured | High |
 | 63 | — | The built-in development webhook key is 34 bytes, so any non-production run without the variable crashes on boot | Medium |
 | 64 | — | A malformed JSON body returns 500 internal_error instead of 400 | Low |
+| 65 | — | Dashboard fee display selects backfilled or future terms | High |
+| 66 | — | Ledger history can be mutated after the payable cache is updated | High |
+| 67 | — | Lifetime and monthly payout monitoring loses fils through floats | Medium |
+| 68 | — | Retrying an adjustment CSV posts the same money twice | High |
+| 69 | — | Concurrent webhook dispatchers race and retries escape their budget | High |
+| 70 | — | Webhook replay changes the delivery identity | High |
+| 71 | — | Support admins can create immediately posted credits | Critical |
+| 72 | — | Reporting skips late commits and concurrent consumers double-count | High |
+| 73 | — | Batch-close reporting crashes on missing daily rows and misses paid status | High |
+| 74 | — | Analytics rebuild races the worker and erases imported history | High |
+| 75 | — | Invalid API inputs reach SQL or silently normalize dates | Medium |
+| 76 | — | Journaled credits and manual corrections never reach payouts | High |
+| 77 | — | Captures committed after a close remain unbatched forever | High |
+| 78 | — | Checkout fields and dashboard tables overflow phone screens | Medium |
+| 79 | — | Vulnerable decoder, frontend and development dependencies remain installed | High |
 
 ## How this was verified (and what was not)
 
@@ -157,6 +172,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** Revoke the old key (`revoked_reason = 'rotated'`) in the same transaction.
 - **Tests:** The existing test asserted the old key still works. It now asserts 401 and `revoked_reason = 'rotated'`.
 
+- **Follow-up (this session):** A key with a future scheduled revocation remained usable even after `revoke_after`, because verification checked only `revoked_at`.
+- **Follow-up fix:** Check the scheduled expiry on every key lookup (`c8dbe5f`).
+- **Follow-up tests:** `apiKeys/verify.test.ts`: expired scheduled keys rejected, unexpired keys accepted. This does not fix merchant suspension; see open findings below.
+
 ## 8. FP-240: outbound webhook signed over different bytes than sent
 **Where:** `apps/api/src/webhooks/dispatcher.ts`, `webhooks/testSend.ts`
 - **What:** It signs `t + "." + canonicalJson(payload)` (sorted keys) but sends `JSON.stringify(payload)` (jsonb key order).
@@ -192,6 +211,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** `SELECT … FOR UPDATE` and **reserve** `refunded_fils += amount` before the acquirer call. Release it on decline or error, then derive the status from the current total.
 - **Tests:** Two parallel full refunds → one 200 and one 422, with exactly one refund row. A decline releases the reservation.
 
+- **Follow-up (this session):** Pending refund reservations were exposed as successful totals; concurrent declines/exceptions could leave wrong totals or stranded refundable capacity.
+- **Follow-up fix:** Use one row-locked transaction for provider result, successful totals and ledger completion (`82129f2`). Cumulative partial fee reversal is recorded separately in #14.
+- **Follow-up tests:** `processRefund.test.ts`: concurrent success/decline, rollback and exact fee conservation. Independent 1001-fils capture with 333 + 668 refunds reverses 8 + 17 = 25 fils.
+
 ## 12. Refund ceiling uses the authorized amount, not the captured amount
 **Where:** `processRefund.ts` (`refundableFils = amountAuthorized - refunded`)
 - **Impact:** Authorize 10.000 BD, capture 4.000 BD, refund 10.000 BD. That's 6 BD more than was ever charged.
@@ -211,12 +234,20 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** Every refund on a discounted merchant hands back fee the platform never kept.
 - **Fix:** Net the capture-time legs (`credit − debit`, `description LIKE 'capture:%'`).
 
+- **Follow-up (this session):** Independently rounding each partial fee reversal lost fils: two half-refunds of a 25-fils fee reversed 12 + 12.
+- **Follow-up fix:** Reverse cumulative successful entitlement less prior reversals; the last refund returns the exact remaining fee (`82129f2`).
+- **Follow-up tests:** `processRefund.test.ts`; independent 1001-fils capture, refunds 333 + 668, fee reversal 8 + 17 = 25 fils.
+
 ## 15. Incident 2026-05-14: payment link charged twice
 **Where:** `apps/api/src/paymentLinks/pay.ts`
 - **What:** A slow pay attempt whose reservation timed out was re-claimed by a second buyer, and both captured. Release and finalize matched any `reserved` row, so a stale request could also free or finalize someone else's reservation.
 - **Why:** The reservation had no owner. The comment "60s can't happen, unreachable" was wrong: the code itself handles the case by answering 200 after a double charge.
 - **Fix:** The claim's `reserved_at::text` is an ownership token. The lease is renewed **only if still ours** right before capture, otherwise the request answers 409 and never captures (the card is only authorized, and the hold expires). Release and finalize are keyed on the token.
 - **Tests:** `paymentLinks/payRace.test.ts` re-claims during authorize, expects 409 with zero captures, and the other reservation stays intact.
+
+- **Follow-up (this session):** Slow capture or local rollback could authorize/capture a second payment; provider keys changed with local claim attempts. Unknown captures could be discarded by expiry, void or cancellation.
+- **Follow-up fix:** Stable provider identities, durable checkout attachment and independently committed operation fences; block competing keys and preserve original-key recovery (`82129f2`, migrations 0081/0086).
+- **Follow-up tests:** Payment-link race/provider retry tests and independent response-loss counterexamples: one remote effect, competing key/void rejected, original-key recovery works after hold expiry. Simulator durability limits remain below.
 
 ## 16. CSV export loads everything into memory; the streaming variant drops rows
 **Where:** `apps/api/src/transactions/exportCsv.ts`, `routes/transactions.ts`
@@ -241,11 +272,19 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** The handler calls `ledger.RebuildAllBalances` (the same code as the CLI). Removed the second path and its tests, which locked in the wrong source. ADR-0004 is marked superseded.
 - **Tests:** The internal API test now makes the export line (7000) disagree with the ledger (12000) and expects the ledger value.
 
+- **Follow-up (this session):** Capture/close/credit cache writers could count the same money twice or omit journaled money; rebuilds could race ledger insertions.
+- **Follow-up fix:** One payable-cache authority on ledger insertion, removal of duplicate deltas, locked ledger-based rebuilds (`276eb2d`, migration 0078).
+- **Follow-up tests:** `db/payableCache.test.ts`, ledger rebuild tests and capture/close regressions; cache equals ledger after ordinary lifecycle checks. Cache-only display adjustments remain a separate policy.
+
 ## 19. Settlement splits are a few fils short (or over)
 **Where:** `apps/settlement/internal/splits/allocate.go`, `shares.go`
 - **Why:** Each child is rounded independently with `ApplyRateFils`. Nothing reconciles the rounding back to the net.
 - **Impact:** Net 10.001 BD split 3333/3333/3334 pays 10.000 (1 fil stuck on the parent). Net 999.999 BD over seven children pays **1000.000**, 1 fil more than exists. The existing test only used amounts that divide evenly.
 - **Fix:** A largest-remainder `ChildShares` (same method as `packages/money` `allocateRemainder`), used by the payout. Shares always sum to the net.
+
+- **Follow-up (this session):** Largest-remainder allocation only conserves money for valid weights; invalid totals/configuration reached payout code.
+- **Follow-up fix:** Validate split configuration before allocation and reject invalid totals (`276eb2d`, `38cc78e`).
+- **Follow-up tests:** `splits/allocate_test.go` checks valid exact allocation and invalid configurations. Parent-owned split ledger policy was not changed.
 
 ## 20. Net payout computed through `float32`
 **Where:** `apps/settlement/internal/settlement/payable.go` (used for the real payout in `batch.go`)
@@ -279,6 +318,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** `amount = amount_fils::numeric / 1000` (derived in SQL from the truncated fils), and post `card_scheme_clearing` credit / `scheme_rounding_residue` debit per line, as ADR-0002 specifies.
 - **Tests:** 93.275 BD → line `93270` fils / `93.27` BD, with 5 fils journaled to residue.
 
+- **Follow-up (this session):** Real PostgreSQL could not infer a reused scheme-export parameter's SQL type.
+- **Follow-up fix:** Explicit parameter typing (`38cc78e`).
+- **Follow-up tests:** Actual Go close/export tests on PostgreSQL; independent 1001-fils capture exports 1000 fils and journals the one-fil residue.
+
 ## 25. March residue sweep: UTC window, charges merchants, not idempotent
 **Where:** `scripts/reconcile_march.ts`
 - **What/Why:**
@@ -288,6 +331,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
   - "re-running is safe, entry_group_id dedupes it" is false (a fresh `randomUUID` per run).
 - **Fix:** Bahrain month bounds, ADR-0002 legs dated at the end of March, and a second run skips merchants already posted.
 
+- **Follow-up (this session):** March reconciliation replay could race; it also derived March residue from the transaction's lifetime amount instead of that period's incremental capture events.
+- **Follow-up fix:** Serialize the sweep and use Bahrain-window capture-event amounts (`276eb2d`).
+- **Follow-up tests:** `scripts/reconcile_march.test.ts` and integration coverage exercise correct period amounts and replay behavior.
+
 ## 26. Compose stack cannot build or boot; acquirer secret committed
 **Where:** `ops/`
 - **What:**
@@ -296,6 +343,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
   - The API (`NODE_ENV=production`) and the settlement daemon exit without `SETTLEMENT_INTERNAL_TOKEN` and `WEBHOOK_SECRET_ENCRYPTION_KEY`.
   - `ACQUIRER_CALLBACK_SIGNING_SECRET` is **committed** in `.env.docker` and "the hosted demo box runs this same file", so anyone with the repo can forge signed callbacks.
 - **Fix:** Added both Dockerfiles and a `.dockerignore`. Added `env_file`. Secrets now come from a gitignored `ops/.env` (documented in `ops/.env.example`), and the committed secret is removed. **The old secret is still in git history and must be rotated with the acquirer.**
+
+- **Follow-up (this session):** The development Compose settlement command was nested under the wrong configuration key.
+- **Follow-up fix:** Correct the YAML nesting (`c8dbe5f`). The development-key defect is tracked under #63.
+- **Follow-up tests:** Compose definition review and API startup checks; later deployment validation is separate.
 
 ## 27. Capture and void have no server-side role check
 **Where:** `apps/api/src/routes/transactions.ts`
@@ -323,6 +374,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** CloseBatch nets refund events (gross minus refund, fee minus fee reversed) and carries forward any refund that would make a day negative. Reconciliation counts unbatched refunds. See FP-300.md.
 - **Tests:** Go netting and carry-forward tests; reconciliation with a refund explains to 0.
 
+- **Follow-up (this session):** Deferring a large refund whole could leave it unpaid indefinitely while later small captures kept paying out.
+- **Follow-up fix:** Claim each refund once and carry signed negative debt through later chronological batches (`38cc78e`, migration 0085). Journaled credit inclusion is tracked separately below.
+- **Follow-up tests:** Refund-netting and adjustment tests recover debt over multiple small capture days without claiming the refund twice.
+
 ## 31. Payment-link captures skip the negotiated discount
 **Where:** `apps/api/src/paymentLinks/pay.ts`
 - **What:** Merchants with a negotiated discount pay the full MDR on every payment-link sale.
@@ -330,6 +385,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** Overcharged merchants, and the ledger disagrees with what settlement later computes for the same capture.
 - **Fix:** Call the adjustment after a successful link capture, exactly as the route does.
 - **Tests:** 10.000 BD link at 2.5% MDR with a 20% discount → net fee 200 fils.
+
+- **Follow-up (this session):** Discount posting happened separately from capture and could race refunds/partial captures or mutate the wrong event. Later pricing could alter reconstructed historical fees.
+- **Follow-up fix:** Post each capture's discount atomically with immutable net-fee metadata (`82129f2`).
+- **Follow-up tests:** `payments/discountAdjustment.test.ts` checks exact discounted fees, event identity and historical pricing changes.
 
 ## 32. Settlement applies the negotiated discount in a different order than the ledger
 **Where:** `apps/settlement/internal/settlement/discounted_fee.go`
@@ -346,6 +405,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** Any merchant with a fee-schedule row shows an unexplained reconciliation gap.
 - **Fix:** Read the fee actually recorded at capture (`metadata.feeFils`) and apply the discount as the ledger does. The float estimator is removed.
 - **Tests:** Schedule at 4% vs 2.5% on the merchant row → pending 9,600, gap 0.
+
+- **Follow-up (this session):** Reconciliation could report zero gap for a paid batch with missing payout journals; it also mixed event-period activity with batch-date payouts.
+- **Follow-up fix:** Repeatable-read reconciliation checks actual payout legs, source/adjustment claims, carry continuity and batch arithmetic separately (`38cc78e`).
+- **Follow-up tests:** Independent missing/underpaid/corrupted batch cases return unexplained; valid financial lifecycle returns gap zero.
 
 ## 34. The hold-cleanup script deletes every hold on a quiet night
 **Where:** `scripts/expire_holds.ts`, `scripts/lib/sqlFilter.ts`
@@ -393,6 +456,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** Require `s.authenticated = true`.
 - **Tests:** A pending session no longer authenticates.
 
+- **Follow-up (this session):** Production could honor development OTP exposure or disable callback signature checking through configuration overrides.
+- **Follow-up fix:** Ignore development OTP exposure and keep signatures required in production (`82129f2`).
+- **Follow-up tests:** Production config regressions. Later explicit `DEMO_SHOW_OTP_IN_PRODUCTION` (`222cb24`, outside this audit fix) intentionally exposes codes for the accepted hackathon demo; it is not real second-factor delivery.
+
 ## 40. KYC "must be a PDF" is decided on the file name
 **Where:** `apps/api/src/onboarding/kyc.ts`
 - **What:** A JPEG renamed `cr.pdf` passes for commercial registration and bank letters.
@@ -409,6 +476,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** Refuse loopback, private, link-local and internal names in production; `redirect: "manual"`; cap the response read at 64 KiB.
 - **Tests:** Unit tests for rejected and accepted hosts; the local test receiver still works outside production.
 
+- **Follow-up (this session):** A public-looking hostname could resolve/rebind to private addresses after URL validation; receiver responses could also consume unbounded memory.
+- **Follow-up fix:** Validate all DNS answers, pin the vetted socket address, refuse redirects and cap response bytes (`82129f2`).
+- **Follow-up tests:** `webhooks/transport.test.ts`: private/mixed DNS, actual address pinning, redirects, body cap and DNS timeout.
+
 ## 42. One payout produces several disbursement records
 **Where:** `apps/api/src/webhooks/payoutDisbursement.ts`
 - **What:** The dispatcher records a payout instruction for every first-attempt `settlement.paid` delivery row.
@@ -416,6 +487,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** A merchant with two endpoints gets two payout instructions for one batch.
 - **Fix:** Make the insert idempotent per batch (advisory lock plus `WHERE NOT EXISTS`).
 - **Tests:** Three concurrent calls for one batch → one row.
+
+- **Follow-up (this session):** Payout instructions were created by webhook delivery, so merchants with no webhook endpoint received no durable instruction.
+- **Follow-up fix:** Normal/split settlement owns instruction creation in the payout transaction; dispatcher only validates (`38cc78e`).
+- **Follow-up tests:** Actual CLI run with zero endpoints: one instruction, and rerun creates none. Existing duplicate/mismatched historical instructions fail visibly.
 
 ## 43. Bulk KYC approve also approves rejected merchants
 **Where:** `apps/api/src/admin/bulkKyc.ts`
@@ -436,6 +511,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **What / Why:** The whole date range is read into one array and stored as one TEXT value. `ADMIN.md` says "archives are written in pages of 1000, so any range is fine"; there is no paging.
 - **Impact:** A long range on a busy endpoint can run the 512 MB API out of memory.
 - **Fix:** Refuse ranges above 5,000 deliveries with a clear error, and correct `ADMIN.md`.
+
+- **Follow-up (this session):** Delivery-count limits alone did not bound archive bytes; counting and materializing different snapshots also raced.
+- **Follow-up fix:** Payload byte/count checks in one repeatable-read snapshot (`82129f2`).
+- **Follow-up tests:** `webhooks/archiveReplay.test.ts` rejects oversized archives without partial materialization.
 
 ## 46. Settlement summary multiplies multi-part captures
 **Where:** `apps/api/src/settlement/query.ts` (`getSettlementSummary`)
@@ -477,6 +556,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** Closed (unpaid) batches are updated as before, so the payout follows. A paid batch keeps its row and only gets the correcting ledger entry; the amount already posted is subtracted so a re-run posts nothing.
 - **Tests:** Go test: a paid batch stays frozen and a second run adjusts nothing. (Not compiled here.)
 
+- **Follow-up (this session):** An MDR correction made before payout could be counted again after payout when the same recalculation ran.
+- **Follow-up fix:** Separate already-applied closed-batch corrections from deferred paid-batch corrections and subtract prior adjustment identity (`276eb2d`, `38cc78e`).
+- **Follow-up tests:** `recalculate_mdr_test.go` exercises close → recalculate → pay → repeat without a second financial adjustment. Analytics refresh remains open below.
+
 ## 51. `rebuild-balances --merchant` prints a fix but never saves it
 **Where:** `apps/settlement/internal/ledger/rebuild.go`, `cmd/settlement/main.go`
 - **What:** The command printed `rebuilt=12000` while `merchant_balances` stayed at the drifted value.
@@ -491,6 +574,10 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** One resend every 30 s refills the guess limit, defeating the five-attempt cap.
 - **Fix:** Copy the used count onto the new challenge.
 - **Tests:** After four wrong codes and a resend, the new challenge shows 4 used (before: 0).
+
+- **Follow-up (this session):** Concurrent resend copied a stale guess count; restarting password login multiplied challenge budgets. Promotion did not recheck current account state.
+- **Follow-up fix:** Serialized resend/promotion and an account-wide OTP budget for merchant/admin verification; active-state check at promotion (`82129f2`, migration 0084).
+- **Follow-up tests:** `app.test.ts`/auth coverage includes login restart budgets, resend races and suspension before OTP. Existing authenticated-session suspension remains a different open issue.
 
 ## 53. The merchant session cookie expires after 10 minutes
 **Where:** `apps/api/src/routes/auth.ts` (`/otp/verify`)
@@ -570,7 +657,9 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** Replace the fallback with a key that decodes to 32 bytes. Production still refuses to start without a real key.
 - **Tests:** `loadConfig` with `NODE_ENV=development` and no key → boots with a 32-byte key (before: throws "got 34").
 
----
+- **Follow-up (this session):** The same invalid development key was independently found during this audit; it is the startup defect already recorded here, not an additional bug.
+- **Follow-up fix:** The audit corrected the fallback in `c8dbe5f`; subsequent hosting work also corrected its copy. Do not count the two commits as two defects.
+- **Follow-up tests:** `config.test.ts` checks development startup and production key requirements; API boot and configuration review passed.
 
 ## 64. A malformed JSON body returns 500
 **Where:** `apps/api/src/plugins/errorHandler.ts`
@@ -581,45 +670,131 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 
 ---
 
-## Session fix addendum — 30 October 2026
+## 65. Dashboard fee display selects backfilled or future terms
+**Where:** `apps/api/src/fees/currentFeeScheduleDisplay.ts`
+- **What / Why:** Dashboard fee selection used entry/backfill order and could choose a future schedule, displaying terms different from the effective agreement.
+- **Impact:** Merchants see a fee different from the agreement currently in force.
+- **Fix:** Resolve display terms by effective date, excluding future schedules (`c8dbe5f`).
+- **Tests:** `fees/currentFeeScheduleDisplay.test.ts` covers backfills and future schedules.
 
-**Scope and provenance:** These are the fixes made during this audit session on `verify/submission-audit`, starting from `fd8f395` and merged through `9dfa6f5`. Each audit-fix commit referenced in the table is an ancestor of current local `submission` (`de870d2`). They were previously documented mainly in [API review](docs/verification/API_REVIEW_20261030.md), [settlement review](docs/verification/SETTLEMENT_REVIEW_20261030.md), [cross-repository review](docs/verification/CROSS_REPO_REVIEW_20261030.md) and [independent QA](docs/verification/INDEPENDENT_QA_20261030.md), rather than this file. The original #1–64 are not being claimed again as newly discovered fixes. Session IDs below are documentation references, not an additional scored bug count.
 
-### Verified fixes missing from the consolidated register
+## 66. Ledger history can be mutated after the payable cache is updated
+**Where:** `db/migrations/0083_ledger_append_only.sql`
+- **What / Why:** An insert-maintained cache could drift if existing ledger rows were edited or deleted.
+- **Impact:** UPDATE/DELETE can invalidate the journal audit trail and drift an insert-maintained cache.
+- **Fix:** Enforce append-only journal history (`276eb2d`, migration 0083).
+- **Tests:** Migration guards UPDATE/DELETE; supported corrections are new balanced postings. This is an invariant safeguard, not a historical repair.
 
-| Session ID / original entry | Symptom, root cause and impact | Correction and commit | Verification |
-|---|---|---|---|
-| S01 · #26/#63 follow-up | Local API startup failed because the development encryption fallback decoded to 34 bytes; development Compose also nested the settlement command incorrectly. | Valid 32-byte fallback and corrected YAML (`c8dbe5f`). Later hosting work independently corrected its copy of the fallback; do not count that twice. | `config.test.ts` checks development startup and production key requirements; API boot and configuration review passed. |
-| S02 · #7 follow-up | A key with a future scheduled revocation remained usable even after `revoke_after`, because verification checked only `revoked_at`. | Check the scheduled expiry on every key lookup (`c8dbe5f`). | `apiKeys/verify.test.ts`: expired scheduled keys rejected, unexpired keys accepted. This does not fix merchant suspension; see open findings below. |
-| S03 · fee display | Dashboard fee selection used entry/backfill order and could choose a future schedule, displaying terms different from the effective agreement. | Resolve display terms by effective date, excluding future schedules (`c8dbe5f`). | `fees/currentFeeScheduleDisplay.test.ts` covers backfills and future schedules. |
-| S04 · #18/#51 follow-up | Capture/close/credit cache writers could count the same money twice or omit journaled money; rebuilds could race ledger insertions. | One payable-cache authority on ledger insertion, removal of duplicate deltas, locked ledger-based rebuilds (`276eb2d`, migration 0078). | `db/payableCache.test.ts`, ledger rebuild tests and capture/close regressions; cache equals ledger after ordinary lifecycle checks. Cache-only display adjustments remain a separate policy. |
-| S05 · journal integrity | An insert-maintained cache could drift if existing ledger rows were edited or deleted. | Enforce append-only journal history (`276eb2d`, migration 0083). | Migration guards UPDATE/DELETE; supported corrections are new balanced postings. This is an invariant safeguard, not a historical repair. |
-| S06 · payout monitoring | Lifetime/monthly payout estimates still used float32/REAL despite integer payout fixes, losing fils at higher volume. | Integer monitoring and database view arithmetic (`276eb2d`, migration 0082). | `payout_estimate_test.go` includes large exact amounts. |
-| S07 · #19 follow-up | Largest-remainder allocation only conserves money for valid weights; invalid totals/configuration reached payout code. | Validate split configuration before allocation and reject invalid totals (`276eb2d`, `38cc78e`). | `splits/allocate_test.go` checks valid exact allocation and invalid configurations. Parent-owned split ledger policy was not changed. |
-| S08 · #25 follow-up | March reconciliation replay could race; it also derived March residue from the transaction's lifetime amount instead of that period's incremental capture events. | Serialize the sweep and use Bahrain-window capture-event amounts (`276eb2d`). | `scripts/reconcile_march.test.ts` and integration coverage exercise correct period amounts and replay behavior. |
-| S09 · #50 follow-up | An MDR correction made before payout could be counted again after payout when the same recalculation ran. | Separate already-applied closed-batch corrections from deferred paid-batch corrections and subtract prior adjustment identity (`276eb2d`, `38cc78e`). | `recalculate_mdr_test.go` exercises close → recalculate → pay → repeat without a second financial adjustment. Analytics refresh remains open below. |
-| S10 · adjustment imports | Uploading identical CSV content created another import and posted the same adjustment twice. Direct cache deltas also conflicted with the ledger cache authority. | Durable normalized content/request-key receipt, mismatch rejection and journal-driven cache update (`881ccfb`, migration 0080). | `admin/adjustmentImport.test.ts`: retry does not repost; differing content under the same key rejects. |
-| S11 · webhook concurrency | Dispatchers could send the same pending row concurrently. Preparation failures or crashed attempts could evade the retry budget; stale leases could complete newer work. | Durable claim leases, bounded attempts, lease/endpoint recheck before handoff and fenced completion (`ebe826f`, `38cc78e`, migration 0079). | `webhooks/dispatcher.test.ts` and independent lease/crash-budget checks. Delivery remains at-least-once; receivers still deduplicate. |
-| S12 · webhook replay | Replay allocated a new receiver delivery identity, defeating merchant deduplication. | Reset retry state on the original delivery identity (`ebe826f`). | Replay/dispatcher tests verify stable `Webhook-Delivery-Id` across replay. |
-| S13 · admin credits | Credit creation required an admin session but no finance role, allowing support to post below-threshold financial credits. | Finance/super-admin role gate (`6128786`). | `routes/adminCredits.test.ts`: actual support login/OTP returns 403 and creates no journal. Principal-only second-approval threshold policy is unchanged. |
-| S14 · reporting cursor | Sequence order is not commit order: a lower event ID committed late was skipped forever. Concurrent consumers could also double-aggregate. | Per-event durable receipts and consumer serialization (`6128786`, migration 0077). | `consumer/concurrency.test.ts`: late lower IDs recovered and concurrent passes apply once. |
-| S15 · reporting event application | Batch-close projection could dereference a nonexistent daily rollup row, including refund-only/no-capture days; paid payout events were not reflected in normal reporting. | Treat absent diagnostic history as zero and consume paid-status projection updates (`6128786`). | Reporting apply/consumer tests; malformed financial payloads still fail and roll back rather than being silently skipped. |
-| S16 · analytics rebuild | Rebuild could race incremental consumption or erase imported source history lacking outbox events; independently read source/receipt sets could disagree. | Shared lock plus one-statement source/batch/eligible-event snapshot and atomic receipt rebuild (`6128786`). | Concurrency tests cover rebuild versus consumer and source-only imported history. |
-| S17 · input boundaries | Invalid dates, UUIDs, pagination/cursors and money input reached SQL casts or normalized nonexistent dates, producing errors or incorrect ranges. | Typed validation at the registered API boundaries (`6128786`, `82129f2`). | `routes/inputValidation.test.ts` and settlement route regressions include invalid calendar dates and equal-time pagination. This is not a claim that every unused helper was rewritten. |
-| S18 · #31/#32 follow-up | Discount posting happened separately from capture and could race refunds/partial captures or mutate the wrong event. Later pricing could alter reconstructed historical fees. | Post each capture's discount atomically with immutable net-fee metadata (`82129f2`). | `payments/discountAdjustment.test.ts` checks exact discounted fees, event identity and historical pricing changes. |
-| S19 · #11/#14 follow-up | Pending refund reservations were exposed as successful totals; declines/exceptions stranded capacity. Separately rounded partial fee reversals lost fils (12 + 12 instead of 25). | Row-locked successful refund completion and cumulative fee entitlement minus prior reversals (`82129f2`). | `processRefund.test.ts`: concurrent success/decline, rollback and exact fee conservation. Independent 1001-fils capture with 333 + 668 refunds reverses 8 + 17 = 25 fils. |
-| S20 · #15/provider recovery | Slow capture or local rollback could authorize/capture a second payment; provider keys changed with local claim attempts. Unknown captures could be discarded by expiry, void or cancellation. | Stable provider identities, durable checkout attachment and independently committed operation fences; block competing keys and preserve original-key recovery (`82129f2`, migrations 0081/0086). | Payment-link race/provider retry tests and independent response-loss counterexamples: one remote effect, competing key/void rejected, original-key recovery works after hold expiry. Simulator durability limits remain below. |
-| S21 · #4/#52 follow-up | Concurrent resend copied a stale guess count; restarting password login multiplied challenge budgets. Promotion did not recheck current account state. | Serialized resend/promotion and an account-wide OTP budget for merchant/admin verification; active-state check at promotion (`82129f2`, migration 0084). | `app.test.ts`/auth coverage includes login restart budgets, resend races and suspension before OTP. Existing authenticated-session suspension remains a different open issue. |
-| S22 · production flags | Production could honor development OTP exposure or disable callback signature checking through configuration overrides. | Ignore development OTP exposure and keep signatures required in production (`82129f2`). | Production config regressions. Later explicit `DEMO_SHOW_OTP_IN_PRODUCTION` (`222cb24`, outside this audit fix) intentionally exposes codes for the accepted hackathon demo; it is not real second-factor delivery. |
-| S23 · #41 follow-up | A public-looking hostname could resolve/rebind to private addresses after URL validation; receiver responses could also consume unbounded memory. | Validate all DNS answers, pin the vetted socket address, refuse redirects and cap response bytes (`82129f2`). | `webhooks/transport.test.ts`: private/mixed DNS, actual address pinning, redirects, body cap and DNS timeout. |
-| S24 · #45 follow-up | Delivery-count limits alone did not bound archive bytes; counting and materializing different snapshots also raced. | Payload byte/count checks in one repeatable-read snapshot (`82129f2`). | `webhooks/archiveReplay.test.ts` rejects oversized archives without partial materialization. |
-| S25 · payout adjustments/debt | Journaled credits/manual corrections never reached event-only payouts. Large refunds could remain deferred forever while small future captures kept paying out. | Durable adjustment claims and signed carry debt recovered across later batches (`38cc78e`, migration 0085). | `adjustments_test.go` and refund-netting tests check claim-once behavior, credits and debt recovery over multiple small days. Cache-only display corrections are intentionally excluded. |
-| S26 · late settlement events | A capture committed after its business day closed could be left unbatched permanently. | Claim eligible older unbatched events once in the next chronological close, preserving closed history (`38cc78e`). | Batch tests assert late inclusion, future-event exclusion, durable receipt and no duplicate on rerun. |
-| S27 · #30/#33 follow-up | Reconciliation could report zero gap for a paid batch with missing payout journals; it also mixed event-period activity with batch-date payouts. | Repeatable-read reconciliation checks actual payout legs, source/adjustment claims, carry continuity and batch arithmetic separately (`38cc78e`). | Independent missing/underpaid/corrupted batch cases return unexplained; valid financial lifecycle returns gap zero. |
-| S28 · #42 follow-up | Payout instructions were created by webhook delivery, so merchants with no webhook endpoint received no durable instruction. | Normal/split settlement owns instruction creation in the payout transaction; dispatcher only validates (`38cc78e`). | Actual CLI run with zero endpoints: one instruction, and rerun creates none. Existing duplicate/mismatched historical instructions fail visibly. |
-| S29 · scheme export | Real PostgreSQL could not infer a reused scheme-export parameter's SQL type. | Explicit parameter typing (`38cc78e`). | Actual Go close/export tests on PostgreSQL; independent 1001-fils capture exports 1000 fils and journals the one-fil residue. |
-| S30 · mobile layout | Checkout numeric fields and merchant/admin tables overflowed narrow viewports. | Shrinkable form grid, wrapping and contained table scrolling (`dba052c`). | Desktop/390px browser evidence and independent CSS review. Later restyles were separate work; this does not certify comprehensive accessibility. |
-| S31 · dependency findings | Vulnerable decoder and development/router dependencies remained in the full workspace despite a misleading workspace-scoped audit result. | Compatible patches/sharp update (`39de897`), then tested Vite/plugin/router upgrades (`ba21deb`). | Full-workspace `npm audit` zero findings at verification; typecheck, both builds, decoder tests and browser regressions pass. Zero dependency findings does not certify application security. |
+
+## 67. Lifetime and monthly payout monitoring loses fils through floats
+**Where:** `apps/settlement/internal/settlement/payout_estimate.go`, `db/migrations/0082_integer_payout_monitoring.sql`
+- **What / Why:** Lifetime/monthly payout estimates still used float32/REAL despite integer payout fixes, losing fils at higher volume.
+- **Impact:** High-volume monitoring estimates disagree with exact financial amounts.
+- **Fix:** Integer monitoring and database view arithmetic (`276eb2d`, migration 0082).
+- **Tests:** `payout_estimate_test.go` includes large exact amounts.
+
+
+## 68. Retrying an adjustment CSV posts the same money twice
+**Where:** `apps/api/src/admin/adjustmentImport.ts`, migration 0080
+- **What / Why:** Uploading identical CSV content created another import and posted the same adjustment twice. Direct cache deltas also conflicted with the ledger cache authority.
+- **Impact:** A network retry or repeated upload duplicates financial adjustments.
+- **Fix:** Durable normalized content/request-key receipt, mismatch rejection and journal-driven cache update (`881ccfb`, migration 0080).
+- **Tests:** `admin/adjustmentImport.test.ts`: retry does not repost; differing content under the same key rejects.
+
+
+## 69. Concurrent webhook dispatchers race and retries escape their budget
+**Where:** `apps/api/src/webhooks/dispatcher.ts`, migration 0079
+- **What / Why:** Dispatchers could send the same pending row concurrently. Preparation failures or crashed attempts could evade the retry budget; stale leases could complete newer work.
+- **Impact:** Concurrent sends, stale completions and unbounded failed attempts undermine delivery reliability.
+- **Fix:** Durable claim leases, bounded attempts, lease/endpoint recheck before handoff and fenced completion (`ebe826f`, `38cc78e`, migration 0079).
+- **Tests:** `webhooks/dispatcher.test.ts` and independent lease/crash-budget checks. Delivery remains at-least-once; receivers still deduplicate.
+
+
+## 70. Webhook replay changes the delivery identity
+**Where:** `apps/api/src/webhooks/replay.ts`
+- **What / Why:** Replay allocated a new receiver delivery identity, defeating merchant deduplication.
+- **Impact:** A receiver deduplicating by delivery ID can process the same event twice.
+- **Fix:** Reset retry state on the original delivery identity (`ebe826f`).
+- **Tests:** Replay/dispatcher tests verify stable `Webhook-Delivery-Id` across replay.
+
+
+## 71. Support admins can create immediately posted credits
+**Where:** `apps/api/src/routes/adminCredits.ts`
+- **What / Why:** Credit creation required an admin session but no finance role, allowing support to post below-threshold financial credits.
+- **Impact:** A role without finance authority can move money through below-threshold credits.
+- **Fix:** Finance/super-admin role gate (`6128786`).
+- **Tests:** `routes/adminCredits.test.ts`: actual support login/OTP returns 403 and creates no journal. Principal-only second-approval threshold policy is unchanged.
+
+
+## 72. Reporting skips late commits and concurrent consumers double-count
+**Where:** `apps/reporting/src/consumer/cursor.ts`, `runConsumerPass.ts`, migration 0077
+- **What / Why:** Sequence order is not commit order: a lower event ID committed late was skipped forever. Concurrent consumers could also double-aggregate.
+- **Impact:** Merchant financial projections permanently omit or duplicate committed events.
+- **Fix:** Per-event durable receipts and consumer serialization (`6128786`, migration 0077).
+- **Tests:** `consumer/concurrency.test.ts`: late lower IDs recovered and concurrent passes apply once.
+
+
+## 73. Batch-close reporting crashes on missing daily rows and misses paid status
+**Where:** `apps/reporting/src/consumer/applyEvent.ts`
+- **What / Why:** Batch-close projection could dereference a nonexistent daily rollup row, including refund-only/no-capture days; paid payout events were not reflected in normal reporting.
+- **Impact:** Normal event consumption can roll back or leave payout reports marked closed.
+- **Fix:** Treat absent diagnostic history as zero and consume paid-status projection updates (`6128786`).
+- **Tests:** Reporting apply/consumer tests; malformed financial payloads still fail and roll back rather than being silently skipped.
+
+
+## 74. Analytics rebuild races the worker and erases imported history
+**Where:** `apps/api/src/admin/reportingRebuild.ts`, `apps/reporting/src/cli/rebuild.ts`
+- **What / Why:** Rebuild could race incremental consumption or erase imported source history lacking outbox events; independently read source/receipt sets could disagree.
+- **Impact:** Rebuild can lose source-only financial history or double-count incremental events.
+- **Fix:** Shared lock plus one-statement source/batch/eligible-event snapshot and atomic receipt rebuild (`6128786`).
+- **Tests:** Concurrency tests cover rebuild versus consumer and source-only imported history.
+
+
+## 75. Invalid API inputs reach SQL or silently normalize dates
+**Where:** `apps/api/src/lib/requestValidation.ts`, registered transaction, analytics, reporting and settlement routes
+- **What / Why:** Invalid dates, UUIDs, pagination/cursors and money input reached SQL casts or normalized nonexistent dates, producing errors or incorrect ranges.
+- **Impact:** Caller errors become server faults or incorrect report windows and pagination.
+- **Fix:** Typed validation at the registered API boundaries (`6128786`, `82129f2`).
+- **Tests:** `routes/inputValidation.test.ts` and settlement route regressions include invalid calendar dates and equal-time pagination. This is not a claim that every unused helper was rewritten.
+
+
+## 76. Journaled credits and manual corrections never reach payouts
+**Where:** `apps/settlement/internal/settlement/adjustments.go`, `batch.go`, migration 0085
+- **What / Why:** Settlement selected only capture/refund events, so real journaled credits and manual corrections were not included in a batch.
+- **Impact:** A genuine journaled correction changes payable but is omitted from event-only payouts.
+- **Fix:** Claim eligible journal adjustments once and include them in batch accounting (`38cc78e`, migration 0085). Cache-only display corrections remain excluded by policy; refund carry is tracked under #30.
+- **Tests:** `adjustments_test.go` and refund-netting tests check claim-once behavior, credits and debt recovery over multiple small days. Cache-only display corrections are intentionally excluded.
+
+
+## 77. Captures committed after a close remain unbatched forever
+**Where:** `apps/settlement/internal/settlement/batch.go`
+- **What / Why:** A capture committed after its business day closed could be left unbatched permanently.
+- **Impact:** A valid capture can be omitted from all future payouts.
+- **Fix:** Claim eligible older unbatched events once in the next chronological close, preserving closed history (`38cc78e`).
+- **Tests:** Batch tests assert late inclusion, future-event exclusion, durable receipt and no duplicate on rerun.
+
+
+## 78. Checkout fields and dashboard tables overflow phone screens
+**Where:** `apps/web/src/pages/checkout/CheckoutPage.css`, `apps/web/src/dashboard.css`, `apps/admin/src/admin.css`
+- **What / Why:** Checkout numeric fields and merchant/admin tables overflowed narrow viewports.
+- **Impact:** Narrow screens clip controls or require document-level horizontal scrolling.
+- **Fix:** Shrinkable form grid, wrapping and contained table scrolling (`dba052c`).
+- **Tests:** Desktop/390px browser evidence and independent CSS review. Later restyles were separate work; this does not certify comprehensive accessibility.
+
+
+## 79. Vulnerable decoder, frontend and development dependencies remain installed
+**Where:** `apps/api/package.json`, `apps/web/package.json`, `apps/admin/package.json`, `package-lock.json`
+- **What / Why:** Vulnerable decoder and development/router dependencies remained in the full workspace despite a misleading workspace-scoped audit result.
+- **Impact:** Known affected dependency versions remain in the complete workspace despite a narrower audit appearing clean.
+- **Fix:** Compatible patches/sharp update (`39de897`), then tested Vite/plugin/router upgrades (`ba21deb`).
+- **Tests:** Full-workspace `npm audit` zero findings at verification; typecheck, both builds, decoder tests and browser regressions pass. Zero dependency findings does not certify application security.
+
+
+---
+
+## Session verification and existing-data effects
+
+The follow-up notes in existing entries and new entries #65–79 come from this audit session, based on `fd8f395` and merged through `9dfa6f5`. Their commit IDs, tests and independent checks are recorded above and in [API review](docs/verification/API_REVIEW_20261030.md), [settlement review](docs/verification/SETTLEMENT_REVIEW_20261030.md), [cross-repository review](docs/verification/CROSS_REPO_REVIEW_20261030.md) and [independent QA](docs/verification/INDEPENDENT_QA_20261030.md). They do not re-count the original fixes as newly found bugs.
 
 ### Test corrections, not additional product bugs
 
@@ -638,9 +813,9 @@ The major review at `de870d2` ran fresh PostgreSQL suites: API 462, reporting 15
 
 These later results supersede older red snapshots in the linked checkpoint documents; they do not prove that every possible bug is fixed. The detailed later review logs are local `/tmp` artifacts, not automatically part of the public submission. Original committed evidence remains under `docs/verification/evidence/`.
 
-### Findings confirmed here but not fixed by this session
+## Reported but not fixed by this session
 
-- **Merchant suspension/closure:** existing API keys still authorize and existing authenticated browser sessions still capture money, despite fresh login rejecting the merchant. Independently reproduced; do not mark S02/S21 as fixing this lifecycle gap.
+- **Merchant suspension/closure:** existing API keys still authorize and existing authenticated browser sessions still capture money, despite fresh login rejecting the merchant. Independently reproduced; the fixes in #7/#52 do not close this lifecycle gap.
 - **Overload coverage:** the guard misses public payment-link payments and transaction URLs carrying query strings. Cap-one reproduction admitted two handlers. Hosted authorization throughput is not completed-checkout throughput.
 - **MDR reporting:** batch fee/net recalculation leaves payout analytics at the old amounts until admin source rebuild. The financial batch correction and stale projection are distinct.
 - **HTTP browser UUID crash:** this review discovered the live transaction-page crash; separate deployed commit `3c4f4d3` subsequently fixed it and the live page was reverified. That code is not in local `de870d2` and was not implemented by this audit session; it is therefore not counted as our fix.
@@ -648,17 +823,10 @@ These later results supersede older red snapshots in the linked checkpoint docum
 
 ---
 
-## Historical open-risk list (before this audit session)
+## Other decisions and open risks
 
-The list below preserves the earlier report. It is **not the current unresolved list**: this session fixed journal-adjustment payouts, late-commit reporting, replay identity and dependency findings above; deployment was subsequently completed separately. Use the addendum and current deployment evidence when preparing the submission.
-
-- **Credits and manual balance adjustments never reach a payout.** Settlement pays from capture and refund events, so a manual credit changes `merchant_payable` and the cache but is never in a batch.
-- **"Adjust balance" only changes the cache** (ADR-0006), although `ADMIN.md` says it is journaled. A rebuild undoes it. This is a deliberate decision in the ADR, but the admin guide is wrong.
-- **MDR recalculation uses the plain `merchants.mdr_bps`**, while a batch close uses the fee schedule in force on each event's date and the platform volume tier. So recalculating a batch that was closed under a schedule or the tier changes its fee even when nothing was edited. What "current terms" should mean is a finance decision.
-- **The reporting worker consumes the outbox by `id`.** A transaction that commits late with a lower id can be skipped. HANDOVER lists the fix (commit order) as unfinished.
-- **A webhook replay gets a new delivery id.** ARCHITECTURE §5 says `Webhook-Delivery-Id` is stable across retries and replays; receivers that dedupe on it will process a replay twice.
-- **Platform volume tier is read at capture time and again at batch close**, so the two can price one capture differently across the threshold. The threshold change (CHANGELOG 1.9.2) also has no finance sign-off, which HANDOVER requires.
-- **Known upstream dead code** (`apps/api/src/v1/*`, `parsePromotionalDiscountFils`, `recordCaptureMetric`) is not wired in. I left it alone.
-- **`npm audit` reports 8 advisories** (3 high, 5 moderate). `fastify`, `fast-uri` and `source-map-js` could be fixed with `npm audit fix`; `vite`, `react-router` and `sharp` need major-version upgrades. I did not change dependencies without being able to run the whole stack.
-- **The hosted deployment on Dilmune Cloud is not done**; the instructions were not available yet.
-- **Rotate the committed acquirer secret.** It is removed from the files (#26) but still in git history.
+- **Cache-only display adjustments:** ADR-0006 deliberately changes the dashboard cache without a journal. A rebuild removes them; they are not money owed through settlement. The earlier admin guide describing them as journaled is misleading.
+- **MDR terms:** recalculation uses merchant MDR, while original capture terms may come from schedules and volume tiers. Defining “current terms” remains a finance decision; see #50 and the stale reporting finding above.
+- **Historical metadata:** old events without immutable net-fee snapshots still need reconstruction and reconciliation; a new-code fix does not establish the correctness of every historical amount.
+- **Unused upstream helpers:** `apps/api/src/v1/*`, `parsePromotionalDiscountFils` and `recordCaptureMetric` are not registered in the live paths reviewed. Latent defects are not counted as reachable exploits.
+- **Previously committed acquirer secret:** removed from working files under #26, but retained in Git history. Real credentials must be rotated; the demo provider is simulated.
