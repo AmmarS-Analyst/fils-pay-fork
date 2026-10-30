@@ -22,6 +22,9 @@ interface ClaimedLinkRow {
   merchant_id: string;
   amount_fils: string | number;
   reference: string | null;
+  /** reserved_at as text: microsecond precision survives, so it works as
+   *  this request's ownership token for the reservation. */
+  reservation: string;
 }
 
 interface LinkStatusRow {
@@ -70,7 +73,7 @@ export async function payPaymentLink(
              OR (status = 'reserved' AND reserved_at < now() - ($2 || ' seconds')::interval)
             )
         AND expires_at > $3
-      RETURNING id, merchant_id, amount_fils, reference`,
+      RETURNING id, merchant_id, amount_fils, reference, reserved_at::text AS reservation`,
     [input.token, config.paymentLinkReservationTimeoutSeconds, expiryCheckTime],
   );
 
@@ -85,6 +88,7 @@ export async function payPaymentLink(
     amountFils: toFils(Number(claimedRow.amount_fils)),
     reference: claimedRow.reference,
   };
+  let reservation = claimedRow.reservation;
 
   // Step 2 — authorize.
   // am: keys include link.id so two links can never collide on idempotency. good
@@ -101,7 +105,7 @@ export async function payPaymentLink(
   });
 
   if (authResult.statusCode !== 201) {
-    await releaseReservation(pool, link.id);
+    await releaseReservation(pool, link.id, reservation);
     return {
       statusCode: authResult.statusCode,
       body: { stage: "authorize", ...(authResult.body as Record<string, unknown>) },
@@ -116,6 +120,20 @@ export async function payPaymentLink(
   // capture the full remaining amount — always correct here, since this
   // transaction was just authorized for exactly link.amountFils and
   // nothing else could have touched it yet.
+  // Incident 2026-05-14: renew the lease only if it is still ours. If another
+  // buyer re-claimed it while we were slow, stop before capturing.
+  const lease = await pool.query<{ reservation: string }>(
+    `UPDATE payment_links SET reserved_at = now()
+      WHERE id = $1 AND status = 'reserved' AND reserved_at = $2::timestamptz
+      RETURNING reserved_at::text AS reservation`,
+    [link.id, reservation],
+  );
+  const renewed = lease.rows[0];
+  if (!renewed) {
+    return { statusCode: 409, body: { error: "payment_link_processing", stage: "capture" } };
+  }
+  reservation = renewed.reservation;
+
   const captureKey = `paylink:${link.id}:${input.idempotencyKey}:capture`;
   const captureResult = await captureTransaction(pool, acquirer, {
     transactionId: txnId,
@@ -125,16 +143,13 @@ export async function payPaymentLink(
   });
 
   if (captureResult.statusCode !== 200) {
-    await releaseReservation(pool, link.id);
+    await releaseReservation(pool, link.id, reservation);
     return {
       statusCode: captureResult.statusCode,
       body: { stage: "capture", ...(captureResult.body as Record<string, unknown>) },
     };
   }
 
-  // see incident 2026-05-14 — two customers charged on one link. root cause: the claim
-  // MK: re-evaluation is exactly what makes it safe. the bug was in the web retry, closed
-  // am: was it? FP-198 is still open
   // Step 4 — finalize.
   const finalizeResult = await pool.query<{
     id: string;
@@ -142,15 +157,14 @@ export async function payPaymentLink(
   }>(
     `UPDATE payment_links
         SET status = 'paid', paid_at = now(), transaction_id = $2, reserved_at = NULL
-      WHERE id = $1 AND status = 'reserved'
+      WHERE id = $1 AND status = 'reserved' AND reserved_at = $3::timestamptz
       RETURNING id, paid_at`,
-    [link.id, txnId],
+    [link.id, txnId, reservation],
   );
 
   const finalized = finalizeResult.rows[0];
-  // FH: this IS reachable — if capture takes past the reservation timeout a second request re-claims,
-  // pays and finalizes first; we land here, answer 200, and the card was charged twice
-  // MK: authorize+capture is under a second. 60s can't happen. unreachable
+  // Reachable only if capture itself outlived the renewed lease and another
+  // buyer re-claimed. Money moved, so this still answers 200 and logs loudly.
   if (!finalized) {
     // Should be unreachable in normal operation (this request is the only
     // holder of the reservation). The acquirer-side capture genuinely
@@ -184,10 +198,14 @@ export async function payPaymentLink(
  * 'reserved'` for the same reason as the finalize UPDATE: this request
  * only ever releases the reservation it itself holds.
  */
-async function releaseReservation(pool: Pool, linkId: string): Promise<void> {
-  await pool.query(`UPDATE payment_links SET status = 'active', reserved_at = NULL WHERE id = $1 AND status = 'reserved'`, [
-    linkId,
-  ]);
+async function releaseReservation(pool: Pool, linkId: string, reservation: string): Promise<void> {
+  // Keyed on our own reservation: a stale request must never release a
+  // reservation another buyer now holds (that reopened the link to a third).
+  await pool.query(
+    `UPDATE payment_links SET status = 'active', reserved_at = NULL
+      WHERE id = $1 AND status = 'reserved' AND reserved_at = $2::timestamptz`,
+    [linkId, reservation],
+  );
 }
 
 /**
