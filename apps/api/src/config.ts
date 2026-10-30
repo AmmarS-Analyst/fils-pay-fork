@@ -37,6 +37,8 @@ export interface Config {
   acquirerRngSeed: number | null;
 
   cookieName: string;
+  /** Browser origins allowed to call the API with credentials (the dashboards). */
+  corsOrigins: string[];
   cookieSecure: boolean;
 
   /** Cookie carrying an `admin_sessions` token. A completely separate name,
@@ -227,6 +229,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : null,
 
     cookieName: env.COOKIE_NAME ?? "fp_sid",
+    corsOrigins: (env.CORS_ORIGINS || "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174")
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o !== ""),
     cookieSecure: parseBoolEnv(env.COOKIE_SECURE, nodeEnv === "production"),
 
     adminCookieName: env.ADMIN_COOKIE_NAME ?? "fp_admin_sid",

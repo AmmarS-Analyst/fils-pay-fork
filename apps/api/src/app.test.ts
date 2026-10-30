@@ -212,6 +212,33 @@ test("logging in to merchant B never signs you in as merchant A when they share 
   assert.equal(me.json().merchant.id, merchantBId);
 });
 
+test("CORS: the dashboard origin gets a credentialed preflight (including PATCH); other origins get nothing", async () => {
+  const url = `/v1/merchants/${randomUUID()}/webhook-endpoints/${randomUUID()}`;
+
+  const ok = await app.inject({
+    method: "OPTIONS",
+    url,
+    headers: { origin: "http://localhost:5173", "access-control-request-method": "PATCH" },
+  });
+  assert.equal(ok.statusCode, 204);
+  assert.equal(ok.headers["access-control-allow-origin"], "http://localhost:5173");
+  assert.equal(ok.headers["access-control-allow-credentials"], "true");
+  assert.match(String(ok.headers["access-control-allow-methods"]), /PATCH/);
+  assert.match(String(ok.headers["access-control-allow-headers"]), /idempotency-key/);
+
+  const other = await app.inject({
+    method: "OPTIONS",
+    url,
+    headers: { origin: "https://evil.example", "access-control-request-method": "PATCH" },
+  });
+  assert.equal(other.headers["access-control-allow-origin"], undefined);
+  assert.equal(other.headers["access-control-allow-credentials"], undefined);
+
+  // A normal request from the dashboard also carries the headers (cookies are sent).
+  const get = await app.inject({ method: "GET", url: "/healthz", headers: { origin: "http://localhost:5174" } });
+  assert.equal(get.headers["access-control-allow-origin"], "http://localhost:5174");
+});
+
 test("login with the wrong password is rejected with a generic invalid_credentials error", async () => {
   const { merchantId, email } = await signup("wrongpw", "the-real-password-123");
   const res = await app.inject({
