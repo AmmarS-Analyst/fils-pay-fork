@@ -17,7 +17,9 @@ export interface BulkApproveMerchantsKycResult {
   approvedMerchantIds: string[];
 }
 
-/** Approves the given merchants and audits it. */
+/** Approves the given merchants that are under review and audits it. Without
+ *  the status filter a rejected (or never-submitted) merchant ticked in the
+ *  list was approved too. */
 export async function bulkApproveMerchantsKyc(
   pool: Pool,
   input: BulkApproveMerchantsKycInput,
@@ -27,6 +29,7 @@ export async function bulkApproveMerchantsKyc(
       `UPDATE merchants
           SET onboarding_status = 'approved', kyc_passed = true
         WHERE id = ANY($1::uuid[])
+          AND onboarding_status = 'under_review'
       RETURNING id`,
       [input.merchantIds],
     );
