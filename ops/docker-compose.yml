@@ -52,10 +52,9 @@ services:
       postgres:
         condition: service_healthy
 
-  # One-off: deterministic seed data. Re-run any time; db/seed/index.ts
-  # resets and regenerates from scratch on every invocation.
-  # AM: the seed only truncates its own fixture tables, so pointing this at a
-  # shared database is fine. MK: correct. (see RUNBOOK)
+  # One-off: deterministic seed data. It truncates merchants, ledger and
+  # transactions, so it refuses to run on a database that already has merchants
+  # unless SEED_RESET=1 is set (docker compose run -e SEED_RESET=1 seed).
   seed:
     build:
       context: ..

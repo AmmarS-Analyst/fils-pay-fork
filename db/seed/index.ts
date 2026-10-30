@@ -5,9 +5,11 @@
  * fails.
  *
  * Usage: DATABASE_URL=postgres://... npx tsx db/seed/index.ts
+ * On a database that already has merchants it refuses unless SEED_RESET=1.
  */
 import { Pool } from "pg";
 import { generate } from "./generate.js";
+import { assertSafeToReseed } from "./guard.js";
 import { buildAssertions, runAssertions } from "./selfVerify.js";
 
 async function main(): Promise<void> {
@@ -30,6 +32,7 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 
   try {
+    await assertSafeToReseed(pool, process.env);
     const summary = await generate(pool);
     console.log(
       `seed: generated ${summary.merchantCount} merchants, ${summary.merchantUserCount} merchant_users, ` +
