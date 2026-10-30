@@ -79,6 +79,7 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 64 | — | A malformed JSON body returns 500 internal_error instead of 400 | Low |
 | 65 | — | Over plain HTTP the checkout Pay button and the transaction page crash (`crypto.randomUUID` missing) | Critical |
 | 66 | — | A suspended or closed merchant keeps working API keys and dashboard sessions | High |
+| 67 | — | Overload guard skipped by a query string and missed public payment-link payments | Medium |
 
 ## How this was verified (and what was not)
 
@@ -601,12 +602,22 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 
 ---
 
+## 67. The overload guard could be skipped
+**Where:** `apps/api/src/plugins/overload.ts`
+- **What / Why:** The guard matched the raw URL, so `POST /v1/transactions?x=1` did not match and went straight to the database pool. The public checkout route `POST /v1/payment-links/:token/pay`, which also holds a connection across the acquirer call, was not in the list. Reported by the captain's review.
+- **Impact:** Under load, checkout traffic (and anyone adding a query string) queued in the pool instead of getting a fast 503, the exact failure the guard exists to prevent.
+- **Fix:** Match on the path without the query string and include the payment-link pay route.
+- **Tests:** With the cap full, `?x=1` and the pay route both get 503, then 200 once a slot frees (before: the `?x=1` request bypassed the guard and blocked on the pool).
+
+---
+
 ## Reported but not changed
 
 These are real, but fixing them is a business or design decision, or large enough that I would not call it a "smallest change". They are listed so the next person does not have to rediscover them.
 
 - **MDR recalculation uses the plain `merchants.mdr_bps`**, while a batch close uses the fee schedule in force on each event's date and the platform volume tier. So recalculating a batch that was closed under a schedule or the tier changes its fee even when nothing was edited. What "current terms" should mean is a finance decision.
 - **Platform volume tier is read at capture time and again at batch close**, so the two can price one capture differently across the threshold. The threshold change (CHANGELOG 1.9.2) also has no finance sign-off, which HANDOVER requires.
+- **Payout analytics lag an MDR recalculation.** After a recalculation the batch fee and net are correct, but the merchant payout-trend analytics keep the old figures until an admin runs the rebuild (captain's review; no payout amount is wrong). Safeguard: have the recalculation refresh the trend rollup in the same transaction.
 - **Known upstream dead code** (`apps/api/src/v1/*`, `parsePromotionalDiscountFils`, `recordCaptureMetric`) is not wired in. I left it alone.
 - **Rotate the committed acquirer secret.** It is removed from the files (#26) but still in git history. The live server uses a freshly generated secret.
 - **No real second factor on the hosted demo.** There is no email/SMS provider, so the demo shows the login code on screen (`DEMO_SHOW_OTP_IN_PRODUCTION`, warned at boot). Safeguard: plug a sender into `auth/notifier.ts` and turn the flag off.

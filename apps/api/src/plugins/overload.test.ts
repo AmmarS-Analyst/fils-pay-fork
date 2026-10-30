@@ -46,3 +46,25 @@ test("a cap of 0 leaves the guard off", async () => {
   const all = await Promise.all([1, 2, 3, 4].map(() => app.inject({ method: "POST", url: "/v1/transactions" })));
   assert.deepEqual(all.map((r) => r.statusCode), [200, 200, 200, 200]);
 });
+
+test("a query string or the public payment-link pay route cannot skip the guard", async () => {
+  const app = Fastify();
+  registerOverloadGuard(app, 1);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  app.post("/v1/transactions", async () => {
+    await gate;
+    return { ok: true };
+  });
+  app.post("/v1/payment-links/:token/pay", async () => ({ ok: true }));
+
+  const first = app.inject({ method: "POST", url: "/v1/transactions" });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal((await app.inject({ method: "POST", url: "/v1/transactions?x=1" })).statusCode, 503);
+  assert.equal((await app.inject({ method: "POST", url: "/v1/payment-links/abc/pay" })).statusCode, 503);
+
+  release();
+  assert.equal((await first).statusCode, 200);
+  assert.equal((await app.inject({ method: "POST", url: "/v1/payment-links/abc/pay" })).statusCode, 200);
+});
