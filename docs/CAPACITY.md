@@ -97,3 +97,46 @@ from a laptop in Bahrain over the internet, closed loop, 12 s per level,
   as a manual stop and is not restarted, by design.
 * Abdu's earlier local measurements: `docs/verification/evidence/load-results.json`
   and `load-overload-results.json`.
+
+## Our estimate for the fixed checkout scenario
+
+**About 20 concurrent checkout users served fast and correctly (≈35–37 completed
+payments per second, p95 under 0.7 s).** Above that, throughput stays flat at
+~31–37/s while the excess is turned away with `503 Retry-After: 1`; nothing
+queues long enough to time out and nothing is half-written.
+
+## Past the limit, with a crash in the middle: is any data lost or doubled?
+
+Run `IT215923` against the live server, `tools/load/overload-integrity.mjs`:
+60 concurrent users for 30 s, each doing a real checkout (authorize 1.001 BD,
+then capture, each with its own Idempotency-Key). 10 s in, the API process was
+killed from the host (`kill -9` on the container PID). Unknown outcomes
+(dropped connections, 5xx) were then retried with the **same** key.
+
+* API killed at 18:59:37 UTC, Docker restarted it, `/readyz` 200 again at
+  18:59:45 (**8 s**, RestartCount 1). All other services kept running.
+* Database afterwards (queries below):
+
+| Check | Result |
+|---|---|
+| Transactions created by the run / distinct references | 1486 / 1486 (no duplicates) |
+| Captured | 1325, total `captured_fils` 1,326,325 = 1325 × 1001 exactly |
+| Captured with a wrong amount | 0 |
+| Captured without ledger entries | 0 |
+| Ledger groups where debits ≠ credits (this run / whole database) | 0 / 0 |
+| Transactions with more than one capture event | 0 |
+| Authorized but not captured | 161: their capture was refused with 503 during overload (no money moved; the hold expires normally or the merchant captures later) |
+
+So under overload plus a crash: accepted work is stored exactly once, refused
+work leaves nothing behind, and the ledger stays balanced. Memory after the run:
+API 93 MB of 512 MB.
+
+```sql
+-- R = run id, e.g. IT215923
+select count(*), count(distinct reference) from transactions where reference like 'R-%';
+select status, count(*), sum(captured_fils) from transactions where reference like 'R-%' group by status;
+select count(*) from (select entry_group_id from ledger_entries group by 1
+  having sum(case when direction='debit' then amount_fils else -amount_fils end) <> 0) x;
+select count(*) from (select e.transaction_id from transaction_events e join transactions t on t.id = e.transaction_id
+  where t.reference like 'R-%' and e.event_type = 'captured' group by 1 having count(*) > 1) x;
+```
