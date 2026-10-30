@@ -208,3 +208,81 @@
   margin-inline-start: 0;
   overflow-wrap: anywhere;
 }
+
+/* Theme: black + red, sharp edges (matches the dashboard). */
+.checkout-page {
+  --ink: #fafafa;
+  --ink-2: #d4d4d8;
+  --ink-3: #a1a1aa;
+  --line: #3f3f46;
+  --accent: #dc2626;
+  background: #111113;
+  border-color: #27272a;
+  border-radius: 2px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
+}
+
+.checkout-page h1 {
+  color: var(--ink-3);
+}
+
+.checkout-amount {
+  color: #fff;
+}
+
+.checkout-form {
+  border-top-color: #27272a;
+}
+
+.checkout-form input {
+  background: #09090b;
+  border-color: var(--line);
+  border-radius: 2px;
+  color: var(--ink);
+}
+
+.checkout-form input::placeholder {
+  color: #71717a;
+}
+
+.checkout-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25);
+}
+
+.checkout-form button {
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.checkout-form button:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.checkout-form button:focus-visible {
+  outline-color: #f87171;
+}
+
+.checkout-error {
+  border-color: #7f1d1d;
+  border-radius: 2px;
+  background: rgba(127, 29, 29, 0.25);
+  color: #fecaca;
+}
+
+.checkout-help,
+.checkout-receipt dt {
+  color: var(--ink-3);
+}
+
+.checkout-receipt {
+  border-color: #27272a;
+  border-radius: 2px;
+  background: #09090b;
+}
+
+@media (max-width: 480px) {
+  .checkout-page {
+    box-shadow: none;
+  }
+}

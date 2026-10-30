@@ -273,3 +273,172 @@ button:disabled {
     min-height: 44px;
   }
 }
+
+/* ==========================================================================
+   Theme: black + red, sharp edges (same look as the merchant dashboard).
+   ========================================================================== */
+
+html,
+body {
+  margin: 0;
+  background: #09090b;
+  color-scheme: dark;
+}
+
+.admin-shell,
+.admin-centered {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #fafafa;
+  background: #09090b;
+}
+
+.admin-header {
+  background: #09090b;
+  border-bottom: 1px solid #27272a;
+}
+
+.admin-brand {
+  color: #fff;
+  font-weight: 700;
+}
+
+.admin-brand::first-letter {
+  color: #dc2626;
+}
+
+.admin-nav a {
+  color: #a1a1aa;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  padding-bottom: 0.2rem;
+}
+
+.admin-nav a:hover {
+  color: #fff;
+}
+
+.admin-nav a.active {
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom-color: #dc2626;
+}
+
+.admin-main a,
+.admin-centered a {
+  color: #fafafa;
+  text-decoration-color: #52525b;
+  text-underline-offset: 3px;
+}
+
+.admin-main a:hover {
+  color: #f87171;
+}
+
+.admin-centered {
+  background: #111113;
+  border: 1px solid #27272a;
+  border-radius: 2px;
+}
+
+.admin-muted,
+.admin-identity {
+  color: #a1a1aa;
+}
+
+.admin-role-chip {
+  border: 1px solid #3f3f46;
+  border-radius: 0;
+  color: #d4d4d8;
+}
+
+.admin-table,
+.admin-dl,
+.admin-filters,
+.admin-form-inline {
+  background: #111113;
+  border-color: #27272a;
+  border-radius: 2px;
+}
+
+.admin-table th,
+.admin-table td {
+  border-color: #1f1f23;
+}
+
+.admin-table th {
+  background: #0c0c0e;
+  color: #71717a;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-table tbody tr:hover {
+  background: #17171a;
+}
+
+.admin-form input,
+.admin-form select,
+.admin-form textarea,
+.admin-filters input,
+.admin-filters select,
+.admin-centered input {
+  background: #09090b;
+  color: #fafafa;
+  border: 1px solid #3f3f46;
+  border-radius: 2px;
+}
+
+.admin-form input:focus,
+.admin-form select:focus,
+.admin-form textarea:focus,
+.admin-filters input:focus,
+.admin-centered input:focus {
+  outline: none;
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25);
+}
+
+.admin-shell button,
+.admin-centered button {
+  background: transparent;
+  color: #fafafa;
+  border: 1px solid #3f3f46;
+  border-radius: 2px;
+}
+
+.admin-shell button:hover:not(:disabled),
+.admin-centered button:hover:not(:disabled) {
+  background: #18181b;
+}
+
+.admin-shell button[type="submit"],
+.admin-centered button[type="submit"] {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.admin-shell button[type="submit"]:hover:not(:disabled),
+.admin-centered button[type="submit"]:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.admin-error {
+  border-color: #7f1d1d;
+  background: rgba(127, 29, 29, 0.25);
+  color: #fecaca;
+}
+
+.admin-notice,
+.admin-confirm {
+  border-color: #3f3f46;
+  background: #18181b;
+  color: #fafafa;
+}
+
+.impersonation-banner {
+  background: #dc2626;
+  color: #fff;
+}

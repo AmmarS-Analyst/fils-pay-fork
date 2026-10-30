@@ -1,6 +1,6 @@
 # UI/UX changes
 
-Seven small commits on `apps/web`, each with a reason. Screenshots are taken at
+Eight small commits on `apps/web`, each with a reason. Screenshots are taken at
 390 px (phone) and 1100 px (desktop) with a headless Chrome against the Vite
 dev server and a stub of the payment-link API (the stub only answers the two
 checkout calls; the declined card ends in `0002`). "Before" is the code at
@@ -15,6 +15,7 @@ checkout calls; the declined card ends in `0002`). "Before" is the code at
 | 5 | `ac8a78b` transaction list | The list had no refund information, amounts were left-aligned (9.990 vs 1234.567 could not be compared) and `partially_refunded` had no colour | New Refunded column, right-aligned tabular money columns (also in the event timeline), status shown as words |
 | 6 | `884415c` dashboard on phones | At 390 px the detail page and event table were wider than the screen and clipped the status; no visible keyboard focus; current page only bold | Detail rows stack, tables scroll inside themselves, focus ring, underline bar on the current nav item, primary submit buttons |
 | 7 | `46ea668` minimal restyle | Pages looked unfinished: browser-default controls, heavy table grid, mixed button styles | CSS only, no new elements: one neutral palette, white cards, soft status pills, quiet table headers, dark primary buttons, focus halo, short transitions; checkout as a centred card |
+| 8 | black + red theme | Team wanted a stronger identity than neutral grey | CSS only, no new elements, dashboard + checkout + admin: black (#09090b) surfaces, white text, red (#dc2626) for primary buttons, focus and the active nav item; sharp 2px corners; statuses are outlined tags (white = money moved, dashed = waiting, red = stopped). shadcn/Tailwind was considered and rejected for tonight: it means rewriting every component; the same look is achieved with plain CSS on the existing React markup |
 
 ## Before / after
 

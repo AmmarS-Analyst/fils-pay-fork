@@ -634,3 +634,257 @@
     min-height: 44px;
   }
 }
+
+/* ==========================================================================
+   Theme: black + red, sharp edges (shadcn-style zinc dark).
+   Overrides the light tokens above; no markup changes.
+   ========================================================================== */
+
+html,
+body {
+  margin: 0;
+  background: #09090b;
+  color-scheme: dark;
+}
+
+.dash-shell,
+.dash-centered {
+  --ink: #fafafa;
+  --ink-2: #d4d4d8;
+  --ink-3: #a1a1aa;
+  --line: #27272a;
+  --line-2: #3f3f46;
+  --bg: #09090b;
+  --card: #111113;
+  --accent: #dc2626;
+  --accent-soft: rgba(220, 38, 38, 0.14);
+  --radius: 2px;
+}
+
+.dash-header {
+  background: rgba(9, 9, 11, 0.9);
+  border-bottom-color: var(--line);
+}
+
+.dash-brand {
+  color: #fff;
+}
+
+.dash-brand::first-letter {
+  color: var(--accent);
+}
+
+.dash-nav a {
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-3);
+}
+
+.dash-nav a:hover {
+  background: transparent;
+  color: #fff;
+}
+
+.dash-nav a.active {
+  background: transparent;
+  color: #fff;
+  border-bottom-color: var(--accent);
+}
+
+.dash-role-chip {
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+}
+
+.dash-centered {
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--line), 0 24px 48px rgba(0, 0, 0, 0.6);
+  background: var(--card);
+}
+
+.dash-main a:not(.dash-button-link) {
+  color: #f87171;
+}
+
+.dash-form input,
+.dash-form select,
+.dash-filters input[type="date"],
+.dash-filters input[type="search"] {
+  border-radius: var(--radius);
+  background: #09090b;
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.dash-form input::placeholder,
+.dash-filters input::placeholder {
+  color: #71717a;
+}
+
+.dash-form input:focus,
+.dash-form select:focus,
+.dash-filters input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25);
+}
+
+.dash-button,
+.dash-button-link {
+  border-radius: var(--radius);
+  background: transparent;
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.dash-button:hover:not(:disabled),
+.dash-button-link:hover {
+  background: #18181b;
+  border-color: #52525b;
+}
+
+.dash-button[type="submit"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.dash-button[type="submit"]:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.dash-filters,
+.dash-form-inline,
+.dash-dl,
+.dash-table {
+  border-radius: var(--radius);
+  background: var(--card);
+  border-color: var(--line);
+}
+
+.dash-table th {
+  background: #0c0c0e;
+  color: #71717a;
+  border-bottom-color: var(--line);
+}
+
+.dash-table th,
+.dash-table td,
+.dash-dl dt,
+.dash-dl dd {
+  border-bottom-color: #1c1c1f;
+}
+
+.dash-table tbody tr:hover {
+  background: #17171a;
+}
+
+.dash-table code {
+  color: var(--ink-3);
+}
+
+.dash-error {
+  border-color: #7f1d1d;
+  background: rgba(127, 29, 29, 0.25);
+  color: #fecaca;
+}
+
+.dash-notice {
+  border-color: var(--line-2);
+  background: #18181b;
+  color: var(--ink);
+}
+
+.dash-confirm,
+.dash-secret {
+  border-color: var(--accent);
+  background: #18181b;
+  color: var(--ink);
+}
+
+/* statuses: white = money moved, red = stopped, grey = waiting or returned */
+.dash-status {
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  color: var(--ink-3);
+}
+
+.dash-status-captured,
+.dash-status-paid,
+.dash-status-succeeded,
+.dash-status-active {
+  background: transparent;
+  border-color: #52525b;
+  color: #fff;
+}
+
+.dash-status-authorized,
+.dash-status-partially_captured,
+.dash-status-pending,
+.dash-status-reserved,
+.dash-status-open {
+  background: transparent;
+  color: var(--ink-2);
+  border-style: dashed;
+}
+
+.dash-status-voided,
+.dash-status-canceled,
+.dash-status-disabled,
+.dash-status-exhausted,
+.dash-status-failed,
+.dash-status-chargeback {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: #7f1d1d;
+  color: #f87171;
+}
+
+.dash-status-refunded,
+.dash-status-partially_refunded,
+.dash-status-closed {
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.dash-badge {
+  border-radius: 0;
+}
+
+.dash-badge-live,
+.dash-badge-ok {
+  background: transparent;
+  border: 1px solid #52525b;
+  color: #fff;
+}
+
+.dash-badge-stale,
+.dash-badge-gap {
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid #7f1d1d;
+  color: #f87171;
+}
+
+.dash-bar {
+  border-radius: 0;
+  background: var(--accent);
+}
+
+.dash-shell .dash-muted,
+.dash-centered .dash-muted {
+  color: var(--ink-3);
+}
+
+.dash-main a:not(.dash-button-link) {
+  color: #fafafa;
+  text-decoration: underline;
+  text-decoration-color: #52525b;
+  text-underline-offset: 3px;
+}
+
+.dash-main a:not(.dash-button-link):hover {
+  color: #f87171;
+  text-decoration-color: #f87171;
+}
