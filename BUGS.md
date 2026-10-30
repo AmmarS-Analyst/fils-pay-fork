@@ -73,6 +73,7 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 60 | — | Deleting a webhook endpoint with delivery history returns 500 | Medium |
 | 61 | — | Bulk KYC approval leaves no review record | High |
 | 62 | — | Capture ignores the authorization hold, so expired authorizations can be captured | High |
+| 63 | — | The built-in development webhook key is 34 bytes, so any non-production run without the variable crashes on boot | Medium |
 
 ## How this was verified (and what was not)
 
@@ -556,6 +557,15 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** An authorization can be captured after it has expired or been released, against the scheme rule.
 - **Fix:** Require an active, unexpired hold; otherwise 409 `authorization_expired`.
 - **Tests:** Expired hold → 409 and nothing captured (before: captured).
+
+---
+
+## 63. The development webhook key is the wrong length
+**Where:** `apps/api/src/config.ts`
+- **What / Why:** Outside production, a missing `WEBHOOK_SECRET_ENCRYPTION_KEY` falls back to a built-in dev key. That key base64-decodes to 34 bytes, but the same file requires exactly 32, so `loadConfig` throws. Found when the seed job on the live server (which did not get the variable) died with "must base64-decode to exactly 32 bytes, got 34".
+- **Impact:** Local development, the seed script and any test run without the variable cannot start at all; the README promise of "a dev key is used otherwise" was never true.
+- **Fix:** Replace the fallback with a key that decodes to 32 bytes. Production still refuses to start without a real key.
+- **Tests:** `loadConfig` with `NODE_ENV=development` and no key → boots with a 32-byte key (before: throws "got 34").
 
 ---
 

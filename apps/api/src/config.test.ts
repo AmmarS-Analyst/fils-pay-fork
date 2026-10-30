@@ -26,3 +26,9 @@ test("the in-flight payment cap follows the pool size unless set", () => {
   assert.equal(loadConfig({ ...BASE, PG_POOL_MAX: "10" }).maxInflightPayments, 20);
   assert.equal(loadConfig({ ...BASE, MAX_INFLIGHT_PAYMENTS: "7" }).maxInflightPayments, 7);
 });
+
+test("outside production the API boots without WEBHOOK_SECRET_ENCRYPTION_KEY (dev fallback is a valid 32-byte key)", () => {
+  const { WEBHOOK_SECRET_ENCRYPTION_KEY: _unused, ...noKey } = BASE;
+  const config = loadConfig({ ...noKey, NODE_ENV: "development" });
+  assert.equal(Buffer.from(config.webhookSecretEncryptionKey, "base64").length, 32);
+});
