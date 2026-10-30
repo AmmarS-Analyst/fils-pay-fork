@@ -5,7 +5,7 @@ Team: AmmarS-Analyst · Branch: `submission` · One commit per bug (see `git log
 Each entry follows the brief: **what is wrong, why it happens, what it breaks**, then the smallest fix and the test that proves it.
 Money is integer **fils (1 BD = 1000 fils)**, per ADR-0001 and the briefing. The repo's `CLAUDE.md`, `.cursorrules` and `AGENTS.md` contradict that (they say "cents", "UTC", "never change tests") and were not followed. Where a test asserted buggy behaviour, it was corrected and the reason is given.
 
-Entries #48–58 came from a second pass over the code; each was checked against the original code, fixed, and given a test.
+Entries #48–62 came from a second pass over the code; each was checked against the original code, fixed, and given a test.
 
 Severity: **Critical** = money lost or stolen, or a security bypass · **High** = wrong money or wrong records · **Medium** = robustness or ops.
 
@@ -69,17 +69,21 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 56 | — | Refund notification to settlement sends one tenth of the amount | Medium |
 | 57 | — | A tiny image can make the KYC thumbnailer allocate gigabytes | Medium |
 | 58 | — | The seed script wipes any database it is pointed at | High |
+| 59 | — | PATCH webhook endpoint with an invalid status returns 500 | Medium |
+| 60 | — | Deleting a webhook endpoint with delivery history returns 500 | Medium |
+| 61 | — | Bulk KYC approval leaves no review record | High |
+| 62 | — | Capture ignores the authorization hold, so expired authorizations can be captured | High |
 
 ## How this was verified (and what was not)
 
-Everything below was run on branch `submission`.
+Everything below was run on branch `submission` (final code, entries #1–62).
 
 | Check | Result |
 |---|---|
 | TypeScript typecheck (api, reporting, web, admin, money, events, scripts, db) | clean |
 | Unit tests that need no database | 193 pass, 0 fail (money 40, events 4, web 8, api 141) |
 | Migrations: the project's own `npm run migrate` on a fresh Postgres | **70 of 70 apply** (upstream stops at 0054) |
-| Database tests, one file at a time, on an in-memory Postgres (PGlite) | **404 pass**, 10 fail in 4 files (explained below). That full run was before #48–58; afterwards I re-ran the files those touch (`app`, `credits`, `adminCredits`, `transactions`, `paymentLinks`, `sessions`): all pass |
+| Database tests, one file at a time, on an in-memory Postgres (PGlite), final code | **416 pass**, 10 fail in 4 files (the same 10 on every run; explained below) |
 | Merchant dashboard production build (`vite build`, run before the comment-only trims) | succeeds |
 
 **The 10 database-test failures are not code bugs.** PGlite is one shared session, so it cannot represent a second concurrent connection or a transaction that is *meant* to fail.
@@ -525,6 +529,34 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Fix:** Refuse when merchants already exist unless `SEED_RESET=1`.
 - **Tests:** Refuses with 8 merchants, runs on an empty database or with the flag.
 
+## 59. PATCH on a webhook endpoint with an invalid status returns 500
+**Where:** `apps/api/src/webhooks/update.ts`
+- **What / Why:** The status goes straight into the `UPDATE` and hits the column's `CHECK (active, disabled)`, which surfaces as a server error.
+- **Fix:** Validate it and answer 400 `invalid_status`.
+- **Tests:** `status: "paused"` → 400 (before: 500).
+
+## 60. Deleting a webhook endpoint that has delivery history returns 500
+**Where:** `apps/api/src/webhooks/cancel.ts`
+- **What:** The doc comment says deliveries are kept when an endpoint is deleted, and a code comment claims "FK is ON DELETE SET NULL (0029)".
+- **Why:** Migration 0022 makes `webhook_deliveries.endpoint_id` `NOT NULL` with no `ON DELETE` rule (0029 is an unrelated migration), so the delete fails as soon as an endpoint has any delivery.
+- **Impact:** Merchants cannot delete a used endpoint and get an opaque 500.
+- **Fix:** Answer 409 `endpoint_has_deliveries` and point to disabling the endpoint, which keeps the audit trail. Loosening the foreign key would have meant making the delivery log nullable.
+- **Tests:** Delete with a delivery → 409 (before: 500).
+
+## 61. Bulk KYC approval leaves no review record
+**Where:** `apps/api/src/admin/bulkKyc.ts`
+- **What / Why:** `recordKycReviewInTx` is documented as the one function allowed to approve a merchant (it writes `merchant_kyc_reviews` and the merchant row together). Bulk approve updated `merchants` directly; a test comment even claims the per-merchant reviews are written.
+- **Impact:** Merchants approved in bulk have no review record, so the compliance trail is missing exactly where approvals are cheapest.
+- **Fix:** Call `recordKycReviewInTx` for each eligible merchant, with the admin as reviewer.
+- **Tests:** Each bulk-approved merchant has an `approved` review row naming the admin (before: none).
+
+## 62. Capture ignores the authorization hold
+**Where:** `apps/api/src/payments/capture.ts`
+- **What / Why:** Authorize creates a hold that lasts 7 days (the card-not-present scheme rule, per a code comment) and `expire_holds` marks old holds `expired`. Capture only checked the transaction status, never the hold.
+- **Impact:** An authorization can be captured after it has expired or been released, against the scheme rule.
+- **Fix:** Require an active, unexpired hold; otherwise 409 `authorization_expired`.
+- **Tests:** Expired hold → 409 and nothing captured (before: captured).
+
 ---
 
 ## Reported but not changed
@@ -533,9 +565,11 @@ These are real, but fixing them is a business or design decision, or large enoug
 
 - **Credits and manual balance adjustments never reach a payout.** Settlement pays from capture and refund events, so a manual credit changes `merchant_payable` and the cache but is never in a batch.
 - **"Adjust balance" only changes the cache** (ADR-0006), although `ADMIN.md` says it is journaled. A rebuild undoes it. This is a deliberate decision in the ADR, but the admin guide is wrong.
+- **MDR recalculation uses the plain `merchants.mdr_bps`**, while a batch close uses the fee schedule in force on each event's date and the platform volume tier. So recalculating a batch that was closed under a schedule or the tier changes its fee even when nothing was edited. What "current terms" should mean is a finance decision.
 - **The reporting worker consumes the outbox by `id`.** A transaction that commits late with a lower id can be skipped. HANDOVER lists the fix (commit order) as unfinished.
 - **A webhook replay gets a new delivery id.** ARCHITECTURE §5 says `Webhook-Delivery-Id` is stable across retries and replays; receivers that dedupe on it will process a replay twice.
 - **Platform volume tier is read at capture time and again at batch close**, so the two can price one capture differently across the threshold. The threshold change (CHANGELOG 1.9.2) also has no finance sign-off, which HANDOVER requires.
 - **Known upstream dead code** (`apps/api/src/v1/*`, `parsePromotionalDiscountFils`, `recordCaptureMetric`) is not wired in. I left it alone.
+- **`npm audit` reports 8 advisories** (3 high, 5 moderate). `fastify`, `fast-uri` and `source-map-js` could be fixed with `npm audit fix`; `vite`, `react-router` and `sharp` need major-version upgrades. I did not change dependencies without being able to run the whole stack.
 - **The hosted deployment on Dilmune Cloud is not done**; the instructions were not available yet.
 - **Rotate the committed acquirer secret.** It is removed from the files (#26) but still in git history.
