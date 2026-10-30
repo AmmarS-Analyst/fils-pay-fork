@@ -24,6 +24,12 @@ import (
 // — YA: it's Asia/Bahrain.
 var businessDayLocation = mustLoadLocation("Asia/Bahrain")
 
+// BusinessDayLocation is the settlement business day's fixed time zone
+// (Asia/Bahrain), for callers that need "today" in business-day terms.
+func BusinessDayLocation() *time.Location {
+	return businessDayLocation
+}
+
 // mustLoadLocation panics at package init if the zone cannot be loaded.
 // cmd/settlement imports time/tzdata, so it cannot fail in the shipped binary.
 func mustLoadLocation(name string) *time.Location {
