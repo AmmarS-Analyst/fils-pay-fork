@@ -30,22 +30,40 @@ export type WebhookTransport = (req: WebhookTransportRequest) => Promise<Webhook
 
 /** Real transport: Node's global fetch with an AbortController-driven
  *  timeout, used by index.ts's production wiring. */
+// Only an excerpt is stored; a huge response must not be buffered in a
+// 512 MB process (the timeout alone does not bound the size).
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
+async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (total < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.byteLength;
+  }
+  await reader.cancel().catch(() => {});
+  return Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
+}
+
 export function createFetchTransport(): WebhookTransport {
   return async (req: WebhookTransportRequest): Promise<WebhookTransportResponse> => {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), req.timeoutMs);
     try {
-      // YA: create.ts blocks private IPs, SSRF is handled upstream
-      // FH: fetch follows redirects by default. claude: "set redirect: 'manual' to prevent SSRF via an open redirect"
+      // Never follow redirects: a public URL could bounce us into the
+      // internal network. A 3xx is just a non-2xx delivery result.
       const response = await fetch(req.url, {
         method: "POST",
         headers: req.headers,
         body: req.body,
         signal: controller.signal,
+        redirect: "manual",
       });
-      // unbounded read, a 1gb response would oom us? — am
-      // MK: timeoutMs bounds it. fine for now, revisit after Eid inshallah
-      const body = await response.text();
+      const body = await readCapped(response, MAX_RESPONSE_BYTES);
       return { statusCode: response.status, body };
     } catch (err) {
       return {
