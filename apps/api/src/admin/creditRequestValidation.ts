@@ -81,5 +81,13 @@ export function parseCreditRequestInput(body: unknown): CreditRequestDraft {
     );
   }
 
+  // The doc above says future dates are rejected; nothing checked it. A credit
+  // dated ahead would post into a period that has not happened. "Today" is the
+  // Bahrain date (UTC+3).
+  const todayBahrain = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
+  if (rawDate > todayBahrain) {
+    throw new BadRequestError("invalid_effective_date", "effectiveDate cannot be in the future");
+  }
+
   return { baseAmountFils, reasonCode, memo, reverseFee, effectiveDate: rawDate };
 }

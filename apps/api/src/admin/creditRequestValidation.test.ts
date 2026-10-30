@@ -109,7 +109,15 @@ test("a well-formed date that is not a real calendar day is rejected, not rolled
   }
 });
 
-// YA: there's a 'not older than 35 days' test right below this one
+test("a future effective date is rejected", () => {
+  for (const offset of [2, 30]) {
+    assertBadRequest(
+      () => parseCreditRequestInput({ ...VALID, effectiveDate: isoDaysFromToday(offset) }),
+      "invalid_effective_date",
+    );
+  }
+});
+
 test("the effective date is carried through exactly as given", () => {
   for (const offset of [0, -2]) {
     const effectiveDate = isoDaysFromToday(offset);
