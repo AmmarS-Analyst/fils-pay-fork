@@ -186,6 +186,32 @@ test("login resolves the OTP recipient to the same account that was authenticate
   assert.equal(meRes.json().merchant.id, merchantId);
 });
 
+test("logging in to merchant B never signs you in as merchant A when they share an email", async () => {
+  const email = `shared-otp-${randomUUID()}@example.test`;
+  const { merchantId: merchantAId } = await signup("otp-a", "password-for-merchant-a-1234", email);
+  const { merchantId: merchantBId } = await signup("otp-b", "password-for-merchant-b-5678", email);
+  assert.notEqual(merchantAId, merchantBId);
+
+  const login = await app.inject({
+    method: "POST",
+    url: "/v1/auth/login",
+    payload: { merchantId: merchantBId, email, password: "password-for-merchant-b-5678" },
+  });
+  assert.equal(login.statusCode, 200, login.body);
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  const verify = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    headers: { cookie },
+    payload: { code: (login.json() as { devOtpCode: string }).devOtpCode },
+  });
+  assert.equal(verify.statusCode, 200, verify.body);
+  assert.equal(verify.json().merchantId, merchantBId);
+
+  const me = await app.inject({ method: "GET", url: "/v1/auth/me", headers: { cookie } });
+  assert.equal(me.json().merchant.id, merchantBId);
+});
+
 test("login with the wrong password is rejected with a generic invalid_credentials error", async () => {
   const { merchantId, email } = await signup("wrongpw", "the-real-password-123");
   const res = await app.inject({
