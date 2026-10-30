@@ -145,7 +145,7 @@ test("GET /v1/analytics/volumes: readModelAsOf/live present, date-range filters,
   });
   assert.equal(res.statusCode, 200, res.body);
   const body = res.json() as {
-    points: Array<{ date: string; capturedCount: number; capturedGrossFils: number; voidedCount: number }>;
+    points: Array<{ date: string; capturedCount: number; capturedGrossFils: number; voidedCount: number; refundCount: number; refundGrossFils: number }>;
     readModelAsOf: string | null;
     live: boolean;
   };
@@ -161,6 +161,8 @@ test("GET /v1/analytics/volumes: readModelAsOf/live present, date-range filters,
   assert.equal(first.capturedCount, 3);
   assert.equal(first.capturedGrossFils, 9_000);
   assert.equal(first.voidedCount, 1);
+  assert.equal(first.refundCount, 0);
+  assert.equal(first.refundGrossFils, 0);
 
   // Merchant scoping: the other merchant never sees this merchant's rows
   // and vice versa.
