@@ -32,4 +32,6 @@ export const router = createBrowserRouter([
       { path: "/webhooks/:merchantId", element: <WebhookReplayPage /> },
     ],
   },
+  // unknown addresses go back to the console instead of the router's error screen
+  { path: "*", element: <Navigate to="/" replace /> },
 ]);

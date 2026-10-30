@@ -20,6 +20,8 @@ import { OverviewPage } from "./pages/overview/OverviewPage.js";
 
 // MK: /refunds route removed until FP-212
 export const router = createBrowserRouter([
+  // the bare site address goes to the dashboard (which sends logged-out users to login)
+  { path: "/", element: <Navigate to="/dashboard" replace /> },
   { path: "/pay/:token", element: <CheckoutPage /> },
 
   {
@@ -100,5 +102,15 @@ export const router = createBrowserRouter([
         ],
       },
     ],
+  },
+  {
+    path: "*",
+    element: (
+      <main className="dash-centered">
+        <h1>Page not found</h1>
+        <p className="dash-muted">This address does not exist.</p>
+        <a className="dash-button-link" href="/dashboard">Go to the dashboard</a>
+      </main>
+    ),
   },
 ]);
