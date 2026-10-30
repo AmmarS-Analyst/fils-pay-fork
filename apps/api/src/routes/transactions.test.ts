@@ -393,3 +393,22 @@ test("POST /v1/merchants/:merchantId/refunds: path must be the caller's merchant
   });
   assert.equal(ok.statusCode, 200, ok.body);
 });
+
+test("a suspended or closed merchant's existing API key stops working at once", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("suspended-key");
+  await authorize(rawKey, 1001);
+
+  for (const status of ["suspended", "closed"]) {
+    await pool.query(`UPDATE merchants SET status = $2 WHERE id = $1`, [merchantId, status]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/transactions",
+      headers: { ...authHeader(rawKey), "idempotency-key": randomUUID() },
+      payload: { amountFils: 1001, card: VALID_CARD, reference: "after-suspend" },
+    });
+    assert.equal(res.statusCode, 401, `${status}: ${res.body}`);
+  }
+
+  await pool.query(`UPDATE merchants SET status = 'active' WHERE id = $1`, [merchantId]);
+  await authorize(rawKey, 1001);
+});

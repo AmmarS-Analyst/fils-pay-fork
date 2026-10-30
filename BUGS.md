@@ -78,6 +78,7 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 63 | — | The built-in development webhook key is 34 bytes, so any non-production run without the variable crashes on boot | Medium |
 | 64 | — | A malformed JSON body returns 500 internal_error instead of 400 | Low |
 | 65 | — | Over plain HTTP the checkout Pay button and the transaction page crash (`crypto.randomUUID` missing) | Critical |
+| 66 | — | A suspended or closed merchant keeps working API keys and dashboard sessions | High |
 
 ## How this was verified (and what was not)
 
@@ -588,6 +589,15 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** On any non-HTTPS deployment the hosted checkout cannot take a payment (the Pay handler throws) and merchants cannot open a transaction, capture or refund from the dashboard. Local development on localhost hides it.
 - **Fix:** One helper, `newIdempotencyKey()`, that uses `randomUUID` when present and otherwise builds a v4 UUID from `crypto.getRandomValues` (available everywhere).
 - **Tests:** With `randomUUID` removed, the helper still returns distinct valid v4 UUIDs; verified on the live site that the transaction page opens again.
+
+---
+
+## 66. Suspending a merchant does not stop its existing keys and sessions
+**Where:** `apps/api/src/apiKeys/verify.ts`, `apps/api/src/auth/sessions.ts`
+- **What / Why:** Login checks `merchants.status = 'active'`, but the API-key and session lookups that run on every request never looked at the merchant. Reported by the captain's review and reproduced on the live server: after suspending a merchant, its existing API key still authorized a payment (201).
+- **Impact:** Suspending or closing a merchant (fraud, offboarding) does not stop it taking or capturing payments until every key is revoked by hand.
+- **Fix:** Both lookups join `merchants` and require `status = 'active'`, so suspension takes effect on the next request; reactivating restores access.
+- **Tests:** Suspended and closed → 401, reactivated → 201 (before: 201 while suspended). Re-checked on the live server.
 
 ---
 
