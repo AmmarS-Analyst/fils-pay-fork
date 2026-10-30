@@ -217,7 +217,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     otpTtlMinutes: parseIntEnv(env.OTP_TTL_MINUTES, 5),
     otpCodeLength: parseIntEnv(env.OTP_CODE_LENGTH, 6),
     otpMaxAttempts: parseIntEnv(env.OTP_MAX_ATTEMPTS, 5),
-    otpDevExpose: nodeEnv !== "production" && parseBoolEnv(env.OTP_DEV_EXPOSE, true),
+    // The dev flag can never leak into production. The hosted hackathon demo has no email/SMS
+    // provider, so it opts in with a separate, deliberately named flag (index.ts warns at boot).
+    otpDevExpose:
+      nodeEnv !== "production"
+        ? parseBoolEnv(env.OTP_DEV_EXPOSE, true)
+        : env.DEMO_SHOW_OTP_IN_PRODUCTION === "true",
 
     argon2MemoryKib: parseIntEnv(env.ARGON2_MEMORY_KIB, 19_456),
     argon2TimeCost: parseIntEnv(env.ARGON2_TIME_COST, 2),

@@ -47,3 +47,12 @@ test("production cannot expose OTP codes or disable acquirer authentication thro
   assert.equal(config.otpDevExpose, false);
   assert.equal(config.acquirerCallbackRequireSignature, true);
 });
+
+test("the hosted demo can show OTP codes in production only through its own explicit flag", () => {
+  const base = { DATABASE_URL: "postgres://unused/local", NODE_ENV: "production",
+    SETTLEMENT_INTERNAL_TOKEN: "test-only", ACQUIRER_CALLBACK_SIGNING_SECRET: "test-only",
+    WEBHOOK_SECRET_ENCRYPTION_KEY: "Y1ZTGTcYbe30GZJebys9w7T3OYZNKewuOH3SUCEdRQk=" };
+  assert.equal(loadConfig(base).otpDevExpose, false);
+  assert.equal(loadConfig({ ...base, DEMO_SHOW_OTP_IN_PRODUCTION: "1" }).otpDevExpose, false);
+  assert.equal(loadConfig({ ...base, DEMO_SHOW_OTP_IN_PRODUCTION: "true" }).otpDevExpose, true);
+});

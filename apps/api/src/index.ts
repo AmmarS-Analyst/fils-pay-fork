@@ -8,6 +8,9 @@ import { createFetchTransport } from "./webhooks/transport.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
+  if (config.nodeEnv === "production" && config.otpDevExpose) {
+    console.warn("[security] DEMO_SHOW_OTP_IN_PRODUCTION is on: login codes are returned to the browser. Demo only.");
+  }
   console.log(`[index] booting, date=${formatIsoDate(new Date())}`);
   const pool = createPool(config);
   // One transport per process: the dispatcher's background pass and the

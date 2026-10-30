@@ -80,7 +80,7 @@ Resource limits: API 0.5 vCPU / 512 MB with the Node heap capped at 384 MB so it
 
 ## OTP (decision to review)
 
-The project has no email or SMS provider. With `NODE_ENV=production` the login code is generated but delivered nowhere, so nobody could log in. The hosted stack therefore sets `OTP_DEV_EXPOSE=true`, which returns the code in the login response (the dashboards show it). That keeps the demo and the automated tests usable but means the second factor is **not a real second factor** here. Before real use: integrate an email/SMS sender in `apps/api/src/auth/notifier.ts` and set `OTP_DEV_EXPOSE=false`.
+The project has no email or SMS provider. With `NODE_ENV=production` the login code is generated but delivered nowhere, so nobody could log in. The hosted demo therefore sets `DEMO_SHOW_OTP_IN_PRODUCTION=true` (the dev flag `OTP_DEV_EXPOSE` is ignored in production), which returns the code in the login response (the dashboards show it). That keeps the demo and the automated tests usable but means the second factor is **not a real second factor** here. Before real use: integrate an email/SMS sender in `apps/api/src/auth/notifier.ts` and set `DEMO_SHOW_OTP_IN_PRODUCTION=false`.
 
 ## Other open points
 

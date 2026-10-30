@@ -75,7 +75,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # There is no email/SMS provider in this project, so with this off nobody
       # could ever receive a login code. See docs/DEPLOY.md ("OTP").
-      OTP_DEV_EXPOSE: ${OTP_DEV_EXPOSE:-true}
+      DEMO_SHOW_OTP_IN_PRODUCTION: ${DEMO_SHOW_OTP_IN_PRODUCTION:-false}
       # Only reachable through the edge proxy, so X-Forwarded-For can be trusted.
       TRUST_PROXY: "true"
       KYC_UPLOAD_DIR: /data/kyc
