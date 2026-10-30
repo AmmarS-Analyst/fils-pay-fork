@@ -53,9 +53,6 @@ export async function adminAdjustmentImportRoutes(app: FastifyInstance): Promise
         throw new BadRequestError("invalid_request", "originalFilename, if given, must be a string");
       }
 
-      // am: no dry run and no idempotency key — uploading the same csv twice posts it twice
-      // MK: finance checks the spreadsheet before uploading. fine for now
-      // FH: parseAdjustmentCsv handles 3dp BD amounts correctly (4.750 -> 4750 fils), Claude checked
       const rows = parseAdjustmentCsv(csvContent);
       for (const row of rows) {
         if (!UUID_RE.test(row.merchantId)) {
@@ -63,10 +60,15 @@ export async function adminAdjustmentImportRoutes(app: FastifyInstance): Promise
         }
       }
 
+      const idempotencyKey = request.headers["idempotency-key"];
+      if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200)) {
+        throw new BadRequestError("invalid_idempotency_key");
+      }
       const result = await applyAdjustmentImport(app.db, {
         adminUserId: adminAuth.adminUserId,
         originalFilename: originalFilename ?? "pasted.csv",
         rows,
+        idempotencyKey,
       });
 
       reply.code(201).send(result);

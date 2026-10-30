@@ -249,3 +249,24 @@ test("getAdjustmentImportRows returns an empty list for an unknown import", asyn
   const rows = await getAdjustmentImportRows(pool, randomUUID());
   assert.deepEqual(rows, []);
 });
+
+
+test("concurrent uploads and renamed copies cannot post the same CSV twice", async () => {
+  const adminUserId = await createAdminUser();
+  const merchantId = await createMerchant();
+  const input = {adminUserId, originalFilename: "duplicate.csv", rows: [{merchantId,amount:"4.750",reason:"correction"}]};
+  const results = await Promise.all([applyAdjustmentImport(pool,input),applyAdjustmentImport(pool,{...input,originalFilename:"renamed.csv"})]);
+  assert.equal(results[0]!.importId,results[1]!.importId);
+  const cache = await pool.query<{cached_payable_fils:string}>("SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id=$1",[merchantId]);
+  assert.equal(Number(cache.rows[0]!.cached_payable_fils),4750);
+  const deliberate = await applyAdjustmentImport(pool,{...input,idempotencyKey:randomUUID()});
+  assert.notEqual(deliberate.importId, results[0]!.importId);
+});
+
+test("an explicit import key cannot be reused for different money", async () => {
+  const adminUserId = await createAdminUser();
+  const merchantId = await createMerchant();
+  const input = {adminUserId,originalFilename:"import.csv",idempotencyKey:randomUUID(),rows:[{merchantId,amount:"1.000"}]};
+  await applyAdjustmentImport(pool,input);
+  await assert.rejects(applyAdjustmentImport(pool,{...input,rows:[{merchantId,amount:"2.000"}]}),/idempotency_key_reused/);
+});

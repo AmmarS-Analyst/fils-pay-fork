@@ -2,7 +2,8 @@ import type { Pool } from "pg";
 import { addFils, toFils, ZERO_FILS, type Fils } from "@filspay/money";
 import { insertAdminAuditLog } from "../adminAudit/log.js";
 import { withTransaction } from "../db/withTransaction.js";
-import { BadRequestError } from "../lib/errors.js";
+import { hashRequest } from "../payments/idempotency.js";
+import { BadRequestError, ConflictError } from "../lib/errors.js";
 import { parseAdjustmentAmountFils } from "./adjustmentCsvParsing.js";
 import { postLedgerAdjustment } from "./ledgerAdjustments.js";
 
@@ -26,13 +27,7 @@ async function postAdjustmentToLedgerAndCache(
   amountFils: Fils,
 ): Promise<string | null> {
   const entryGroupId = await postLedgerAdjustment(client, merchantId, amountFils, "CSV adjustment import");
-  await client.query(
-    `INSERT INTO merchant_balances (merchant_id, cached_payable_fils, updated_at)
-     VALUES ($1, $2, now())
-     ON CONFLICT (merchant_id) DO UPDATE
-       SET cached_payable_fils = merchant_balances.cached_payable_fils + $2, updated_at = now()`,
-    [merchantId, amountFils],
-  );
+  // The ledger trigger updates the cache exactly once.
   return entryGroupId;
 }
 
@@ -45,23 +40,35 @@ async function postAdjustmentToLedgerAndCache(
  */
 export async function applyAdjustmentImport(
   pool: Pool,
-  input: { adminUserId: string; originalFilename: string; rows: AdjustmentImportRow[] },
+  input: { adminUserId: string; originalFilename: string; rows: AdjustmentImportRow[]; idempotencyKey?: string },
 ): Promise<AdjustmentImportResult> {
   if (input.rows.length === 0) {
     throw new BadRequestError("empty_import", "the CSV must contain at least one row");
   }
 
+  const fingerprint = hashRequest(input.rows.map((row) => ({
+    merchantId: row.merchantId.toLowerCase(), amountFils: parseAdjustmentAmountFils(row.amount), reason: row.reason ?? null,
+  })));
+  const requestKey = input.idempotencyKey ? `explicit:${input.idempotencyKey}` : `content:${fingerprint}`;
   return withTransaction(pool, async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`adjustment-import:${requestKey}`]);
+    const prior = await client.query<{id: string; row_count: number; request_hash: string; total: string}>(
+      `SELECT ai.id,ai.row_count,ai.request_hash,COALESCE(SUM(r.parsed_amount_fils),0)::text AS total
+       FROM adjustment_imports ai LEFT JOIN adjustment_import_rows r ON r.adjustment_import_id=ai.id
+       WHERE ai.request_key=$1 GROUP BY ai.id`, [requestKey]);
+    const previous = prior.rows[0];
+    if (previous) {
+      if (previous.request_hash !== fingerprint) throw new ConflictError("idempotency_key_reused");
+      return {importId: previous.id, rowCount: previous.row_count, totalPostedFils: toFils(Number(previous.total), {allowNegative: true})};
+    }
     const importRow = await client.query<{ id: string }>(
-      `INSERT INTO adjustment_imports (uploaded_by_admin_user_id, original_filename, row_count)
-       VALUES ($1, $2, $3) RETURNING id`,
-      [input.adminUserId, input.originalFilename, input.rows.length],
+      `INSERT INTO adjustment_imports (uploaded_by_admin_user_id, original_filename, row_count,request_key,request_hash)
+       VALUES ($1, $2, $3,$4,$5) RETURNING id`,
+      [input.adminUserId, input.originalFilename, input.rows.length,requestKey,fingerprint],
     );
     const importId = importRow.rows[0]!.id;
 
     let total = ZERO_FILS;
-    // FH: claude says nothing here stops the same CSV being applied twice. intended? (asked in #fp-backend 14/8, no answer)
-    // re-upload is blocked by the unique original_filename i think — am
     for (let i = 0; i < input.rows.length; i++) {
       const row = input.rows[i]!;
       const amountFils = parseAdjustmentAmountFils(row.amount);
