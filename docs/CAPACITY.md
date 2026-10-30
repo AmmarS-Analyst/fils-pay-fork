@@ -66,11 +66,34 @@ docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod kill api
 curl -fsS https://YOUR.DOMAIN/readyz
 ```
 
-## Measured results
+## Measured results (live server, Fri 2026-10-30 ~21:30 AST)
 
-_Fill in from a run on the real server (the numbers must be measured, not
-copied from the estimate)._
+Server: 1 vCPU / 2 GB droplet (139.59.62.5), API limited to 0.5 vCPU / 512 MB,
+`PG_POOL_MAX=10`, `MAX_INFLIGHT_PAYMENTS=20`. Client: `tools/load/checkout.mjs`
+from a laptop in Bahrain over the internet, closed loop, 12 s per level,
+`POST /v1/transactions` (authorize, 12.500 BD) with a fresh Idempotency-Key per call.
 
-| workers | req/s | ok/s | shed % | err % | p50 ms | p95 ms | p99 ms |
-|---|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |  |
+| workers | req/s | ok/s | shed % | err % | p50 ms | p95 ms | p99 ms | 503 p95 ms |
+|---|---|---|---|---|---|---|---|---|
+| 5 | 13.8 | 13.4 | 0 | 1.2 | 364 | 509 | 709 | – |
+| 10 | 27.7 | 27.1 | 0 | 0 | 370 | 500 | 548 | – |
+| 20 | 37.8 | 37.1 | 0 | 0.4 | 545 | 696 | 746 | – |
+| 40 | 212.9 | 36.3 | 82.5 | 0 | 627 | 830 | 926 | 129 |
+| 80 | 419.9 | 31.0 | 92.5 | 0.1 | 780 | 1137 | 1307 | 250 |
+
+* **Capacity: about 37 authorizations/s**, matching the ~40/s pool estimate
+  above. At 20 concurrent users nothing is shed and p95 stays under 0.7 s.
+* **Overload:** at 40 and 80 users the API keeps serving 31–36 ok/s and turns
+  the excess away with `503 Retry-After: 1` in 0.1–0.25 s instead of queueing;
+  accepted requests stay under 1.4 s p99. The script does not back off on
+  503, so req/s at those levels is a worst-case hammering rate.
+* "err %" is the simulated acquirer's built-in failure rate and declines, not
+  server faults.
+* **Bottleneck:** the pg connection held across the 100–400 ms acquirer call
+  (10 connections / ~0.27 s), then the 0.5 vCPU.
+* **Crash recovery:** killing the API process from the host (`kill -9` on the
+  container PID) made Docker restart it (`restart: unless-stopped`,
+  RestartCount 1); `/readyz` was 200 again after **7 s**. `docker kill` counts
+  as a manual stop and is not restarted, by design.
+* Abdu's earlier local measurements: `docs/verification/evidence/load-results.json`
+  and `load-overload-results.json`.
