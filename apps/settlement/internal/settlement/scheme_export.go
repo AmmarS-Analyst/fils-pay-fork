@@ -38,6 +38,7 @@ func buildBatchClosedPayload(
 	merchantID, batchID uuid.UUID,
 	batchDate time.Time,
 	grossFils, feeFils, netPayoutFils money.Fils,
+	carry ...money.Fils,
 ) ([]byte, error) {
 	payload := map[string]any{
 		"merchantId":    merchantID.String(),
@@ -46,6 +47,11 @@ func buildBatchClosedPayload(
 		"grossFils":     int64(grossFils),
 		"feeFils":       int64(feeFils),
 		"netPayoutFils": int64(netPayoutFils),
+	}
+	if len(carry) == 3 {
+		payload["adjustmentFils"] = int64(carry[0])
+		payload["carryInFils"] = int64(carry[1])
+		payload["carryOutFils"] = int64(carry[2])
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

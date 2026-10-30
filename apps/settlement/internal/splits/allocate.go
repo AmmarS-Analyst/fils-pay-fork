@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/filspay/settlement/internal/money"
+	"github.com/filspay/settlement/internal/payouts"
 )
 
 // ChildShare is one child's computed allocation from a parent's settlement
@@ -141,6 +142,10 @@ func PayoutSplitBatch(ctx context.Context, db *pgxpool.Pool, batchID uuid.UUID) 
 		if err != nil {
 			return SplitPayoutResult{}, err
 		}
+	}
+
+	if err := payouts.EnsureInstruction(ctx, tx, batchID, netPayout); err != nil {
+		return SplitPayoutResult{}, err
 	}
 
 	// Ledger inserts maintain the payable cache; monitoring follows paid net.

@@ -11,6 +11,9 @@ export interface SettlementBatchDto {
   grossFils: number;
   feeFils: number;
   netPayoutFils: number;
+  adjustmentFils: number;
+  carryInFils: number;
+  carryOutFils: number;
   closedAt: string | null;
   paidAt: string | null;
 }
@@ -23,6 +26,9 @@ interface SettlementBatchRow {
   gross_fils: string | number;
   fee_fils: string | number;
   net_payout_fils: string | number;
+  adjustment_fils: string | number;
+  carry_in_fils: string | number;
+  carry_out_fils: string | number;
   closed_at: Date | null;
   paid_at: Date | null;
 }
@@ -48,8 +54,8 @@ function toBatchDateString(d: Date): string {
 }
 
 /**
- * Maps a settlement_batches row to its DTO. Invariant (enforced by the Go
- * worker at close): netPayoutFils === grossFils - feeFils for every batch.
+ * Maps a settlement_batches row to its DTO. Invariant: net = gross - fee + adjustment + carryIn - carryOut.
+ * Negative proceeds are withheld as carryOut, rather than sent to the bank.
  */
 function serializeBatch(row: SettlementBatchRow): SettlementBatchDto {
   return {
@@ -59,6 +65,9 @@ function serializeBatch(row: SettlementBatchRow): SettlementBatchDto {
     grossFils: Number(row.gross_fils),
     feeFils: Number(row.fee_fils),
     netPayoutFils: Number(row.net_payout_fils),
+    adjustmentFils: Number(row.adjustment_fils),
+    carryInFils: Number(row.carry_in_fils),
+    carryOutFils: Number(row.carry_out_fils),
     closedAt: row.closed_at ? row.closed_at.toISOString() : null,
     paidAt: row.paid_at ? row.paid_at.toISOString() : null,
   };
@@ -117,7 +126,7 @@ export async function listSettlementBatches(
   const decodedCursor = decodeCursor(filters.cursor);
 
   const result = await pool.query<SettlementBatchRow>(
-    `SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, closed_at, paid_at
+    `SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, adjustment_fils, carry_in_fils, carry_out_fils, closed_at, paid_at
        FROM settlement_batches
       WHERE merchant_id = $1
         AND ($2::date IS NULL OR batch_date >= $2)
@@ -166,7 +175,7 @@ export async function getSettlementBatch(
   input: { merchantId: string; batchId: string },
 ): Promise<SettlementBatchDetailDto | null> {
   const batchResult = await pool.query<SettlementBatchRow>(
-    `SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, closed_at, paid_at
+    `SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, adjustment_fils, carry_in_fils, carry_out_fils, closed_at, paid_at
        FROM settlement_batches WHERE id = $1 AND merchant_id = $2`,
     [input.batchId, input.merchantId],
   );
@@ -256,7 +265,11 @@ export interface ReconciliationReport {
   periodFrom: string;
   periodTo: string;
   ledgerMerchantPayableNetFils: number;
+  /** Claimed source contribution in the activity period, before carry timing. */
   settlementNetPayoutFils: number;
+  /** Actual net payout of batches dated within this period. */
+  periodBatchPayoutFils: number;
+  settlementIntegrityGapFils: number;
   pendingUnbatchedFils: number;
   gapFils: number;
   explained: boolean;
@@ -286,73 +299,154 @@ export async function getReconciliationReport(
   const windowStart = bahrainLocalMidnightUtc(input.from);
   const windowEnd = bahrainLocalMidnightUtc(input.to);
 
-  const [ledgerResult, settlementResult, pendingResult, merchantResult] = await Promise.all([
-    pool.query<{ net: string }>(
-      `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0) AS net
-         FROM ledger_entries
-        WHERE merchant_id = $1 AND account_id = 'merchant_payable'
-          AND COALESCE(description, '') NOT LIKE 'settlement payout:%'
-          AND occurred_at >= $2 AND occurred_at < $3`,
-      [input.merchantId, windowStart, windowEnd],
-    ),
-    pool.query<{ total: string }>(
-      `SELECT COALESCE(SUM(net_payout_fils), 0) AS total
-         FROM settlement_batches
-        WHERE merchant_id = $1 AND batch_date >= $2 AND batch_date < $3
-          AND status IN ('closed', 'paid')`,
-      [input.merchantId, input.from, input.to],
-    ),
-    pool.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number; fee_fils: string | number; net_fee_fils: string | number | null }>(
-      `SELECT te.amount_fils,
-              te.event_type IN ('refunded', 'refund_partial') AS is_refund,
-              COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils,
-              COALESCE((te.metadata->>'feeFils')::bigint, 0) AS fee_fils,
-              (te.metadata->>'netFeeFils')::bigint AS net_fee_fils
-         FROM transaction_events te
-         JOIN transactions t ON t.id = te.transaction_id
-        WHERE t.merchant_id = $1
-          AND te.event_type IN ('captured', 'partially_captured', 'refunded', 'refund_partial')
-          AND te.settlement_batch_id IS NULL
-          AND te.occurred_at >= $2 AND te.occurred_at < $3`,
-      [input.merchantId, windowStart, windowEnd],
-    ),
-    pool.query<{ negotiated_discount_bps: number }>(
-      `SELECT negotiated_discount_bps FROM merchants WHERE id = $1`,
-      [input.merchantId],
-    ),
-  ]);
+  const snapshot = await pool.connect();
+  try {
+    await snapshot.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const [ledgerResult, settlementResult, pendingResult, merchantResult, adjustmentsResult, integrityResult] = [
+      await snapshot.query<{ net: string }>(
+        `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0) AS net
+           FROM ledger_entries
+          WHERE merchant_id = $1 AND account_id = 'merchant_payable'
+            AND COALESCE(description, '') NOT LIKE 'settlement payout:%'
+            AND occurred_at >= $2 AND occurred_at < $3`,
+        [input.merchantId, windowStart, windowEnd],
+      ),
+      await snapshot.query<{ total: string }>(
+        `SELECT COALESCE(SUM(net_payout_fils), 0) AS total
+           FROM settlement_batches
+          WHERE merchant_id = $1 AND batch_date >= $2 AND batch_date < $3
+            AND status IN ('closed', 'paid')`,
+        [input.merchantId, input.from, input.to],
+      ),
+      await snapshot.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number; fee_fils: string | number; net_fee_fils: string | number | null; is_settled: boolean }>(
+        `SELECT te.amount_fils,
+                te.event_type IN ('refunded', 'refund_partial') AS is_refund,
+                COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils,
+                COALESCE((te.metadata->>'feeFils')::bigint, 0) AS fee_fils,
+                (te.metadata->>'netFeeFils')::bigint AS net_fee_fils,
+                te.settlement_batch_id IS NOT NULL AS is_settled
+           FROM transaction_events te
+           JOIN transactions t ON t.id = te.transaction_id
+          WHERE t.merchant_id = $1
+            AND te.event_type IN ('captured', 'partially_captured', 'refunded', 'refund_partial')
+            AND te.occurred_at >= $2 AND te.occurred_at < $3`,
+        [input.merchantId, windowStart, windowEnd],
+      ),
+      await snapshot.query<{ negotiated_discount_bps: number }>(
+        `SELECT negotiated_discount_bps FROM merchants WHERE id = $1`,
+        [input.merchantId],
+      ),
+      await snapshot.query<{ amount_fils: string; is_settled: boolean }>(
+        `SELECT CASE WHEN le.direction = 'credit' THEN le.amount_fils ELSE -le.amount_fils END AS amount_fils,
+                (claims.ledger_entry_id IS NOT NULL OR
+                  (le.description = 'MDR recalculation adjustment' AND origin.status IN ('closed', 'paid')
+                   AND (origin.paid_at IS NULL OR le.occurred_at < origin.paid_at))) AS is_settled
+           FROM ledger_entries le
+           LEFT JOIN settlement_adjustment_claims claims ON claims.ledger_entry_id = le.id
+           LEFT JOIN settlement_batches origin ON origin.id = le.settlement_batch_id
+          WHERE le.merchant_id = $1 AND le.account_id = 'merchant_payable'
+            AND le.occurred_at >= $2 AND le.occurred_at < $3
+            AND le.description IN ('manual credit: base', 'manual credit: MDR reversal', 'manual balance adjustment', 'CSV adjustment import',
+               'MDR recalculation adjustment', 'MDR recalculation adjustment: paid batch', 'MDR recalculation adjustment: deferred batch')`,
+        [input.merchantId, windowStart, windowEnd],
+      ),
+      await snapshot.query<{ gap: string }>(
+        `WITH relevant AS (
+           SELECT sb.* FROM settlement_batches sb
+            WHERE sb.merchant_id = $1 AND sb.status IN ('closed', 'paid')
+              AND (sb.batch_date >= $4::date AND sb.batch_date < $5::date
+                OR EXISTS (SELECT 1 FROM transaction_events te WHERE te.settlement_batch_id = sb.id AND te.occurred_at >= $2 AND te.occurred_at < $3)
+                OR EXISTS (SELECT 1 FROM settlement_adjustment_claims c JOIN ledger_entries le ON le.id = c.ledger_entry_id
+                           WHERE c.settlement_batch_id = sb.id AND le.occurred_at >= $2 AND le.occurred_at < $3))
+         ), actual AS (
+           SELECT sb.*,
+             COALESCE((SELECT SUM(te.amount_fils) FROM transaction_events te WHERE te.settlement_batch_id = sb.id), 0) AS claimed_gross,
+             COALESCE((SELECT SUM(CASE WHEN te.event_type IN ('refunded','refund_partial') THEN -COALESCE((te.metadata->>'feeReversedFils')::bigint,0)
+                                      ELSE (te.metadata->>'netFeeFils')::bigint END)
+                       FROM transaction_events te WHERE te.settlement_batch_id=sb.id),0)
+               + COALESCE((SELECT SUM(CASE WHEN le.direction='credit' THEN le.amount_fils ELSE -le.amount_fils END)
+                           FROM ledger_entries le WHERE le.settlement_batch_id=sb.id AND le.account_id='platform_fee_revenue'
+                            AND le.description='MDR recalculation adjustment'
+                            AND (sb.paid_at IS NULL OR le.occurred_at<sb.paid_at)),0) AS claimed_fee,
+             NOT EXISTS(SELECT 1 FROM transaction_events te WHERE te.settlement_batch_id=sb.id
+                        AND te.event_type IN ('captured','partially_captured') AND te.metadata->>'netFeeFils' IS NULL) AS fees_known,
+             COALESCE((SELECT prev.carry_out_fils FROM settlement_batches prev
+                       WHERE prev.merchant_id=sb.merchant_id AND prev.status IN ('closed','paid') AND prev.batch_date<sb.batch_date
+                       ORDER BY prev.batch_date DESC LIMIT 1),0) AS previous_carry,
+             COALESCE((SELECT SUM(CASE WHEN le.direction = 'debit' THEN le.amount_fils ELSE -le.amount_fils END)
+               FROM ledger_entries le WHERE le.settlement_batch_id = sb.id AND le.account_id = 'merchant_payable'
+                 AND le.description LIKE 'settlement payout:%'), 0) AS payable_paid,
+             COALESCE((SELECT SUM(CASE WHEN le.direction = 'credit' THEN le.amount_fils ELSE -le.amount_fils END)
+               FROM ledger_entries le WHERE le.settlement_batch_id = sb.id AND le.account_id = 'platform_cash'
+                 AND le.description LIKE 'settlement payout:%'), 0) AS cash_paid,
+             COALESCE((SELECT SUM(CASE WHEN le.direction = 'credit' THEN le.amount_fils ELSE -le.amount_fils END)
+               FROM settlement_adjustment_claims c JOIN ledger_entries le ON le.id = c.ledger_entry_id
+               WHERE c.settlement_batch_id = sb.id), 0) AS claimed_adjustment
+           FROM relevant sb
+         ) SELECT COALESCE(SUM(
+             ABS(net_payout_fils - (gross_fils - fee_fils + adjustment_fils + carry_in_fils - carry_out_fils))
+             + ABS(gross_fils - claimed_gross)
+             + CASE WHEN fees_known THEN ABS(fee_fils - claimed_fee) ELSE 0 END
+             + ABS(carry_in_fils - previous_carry)
+             + CASE WHEN net_payout_fils < 0 THEN -net_payout_fils ELSE 0 END
+             + ABS(adjustment_fils - claimed_adjustment)
+             + CASE WHEN status = 'paid' THEN ABS(net_payout_fils - payable_paid) + ABS(net_payout_fils - cash_paid)
+                    ELSE ABS(payable_paid) + ABS(cash_paid) END
+           ), 0) AS gap FROM actual`,
+        [input.merchantId, windowStart, windowEnd, input.from, input.to],
+      ),
+    ];
 
-  const discountBps = merchantResult.rows[0]?.negotiated_discount_bps ?? 0;
+    const discountBps = merchantResult.rows[0]?.negotiated_discount_bps ?? 0;
 
-  let pendingUnbatchedFils = 0;
-  for (const row of pendingResult.rows) {
-    const amountFils = Number(row.amount_fils);
-    if (row.is_refund) {
-      // Negative gross, plus the fee it handed back, exactly as journaled.
-      pendingUnbatchedFils += amountFils + Number(row.fee_reversed_fils);
-      continue;
+    let pendingUnbatchedFils = 0;
+    let settlementNetPayoutFils = 0;
+    for (const row of pendingResult.rows) {
+      const amountFils = Number(row.amount_fils);
+      if (row.is_refund) {
+        // Negative gross, plus the fee it handed back, exactly as journaled.
+        const net = amountFils + Number(row.fee_reversed_fils);
+        if (row.is_settled) settlementNetPayoutFils += net;
+        else pendingUnbatchedFils += net;
+        continue;
+      }
+      // Use the fee capture actually charged (fee schedule and volume tier
+      // included) less the discount posting, i.e. exactly what the ledger holds.
+      // mdr_bps is not kept in sync with fee_schedules (there is no trigger).
+      const chargedFee = toFils(Number(row.fee_fils));
+      const netFee = row.net_fee_fils == null ? chargedFee - applyRateFils(chargedFee, discountBps) : Number(row.net_fee_fils);
+      if (row.is_settled) settlementNetPayoutFils += amountFils - netFee;
+      else pendingUnbatchedFils += amountFils - netFee;
     }
-    // Use the fee capture actually charged (fee schedule and volume tier
-    // included) less the discount posting, i.e. exactly what the ledger holds.
-    // mdr_bps is not kept in sync with fee_schedules (there is no trigger).
-    const chargedFee = toFils(Number(row.fee_fils));
-    const netFee = row.net_fee_fils == null ? chargedFee - applyRateFils(chargedFee, discountBps) : Number(row.net_fee_fils);
-    pendingUnbatchedFils += amountFils - netFee;
+
+    for (const row of adjustmentsResult.rows) {
+      if (row.is_settled) settlementNetPayoutFils += Number(row.amount_fils);
+      else pendingUnbatchedFils += Number(row.amount_fils);
+    }
+    const ledgerMerchantPayableNetFils = Number(ledgerResult.rows[0]?.net ?? 0);
+    const periodBatchPayoutFils = Number(settlementResult.rows[0]?.total ?? 0);
+    const settlementIntegrityGapFils = Number(integrityResult.rows[0]?.gap ?? 0);
+    const activityGap = ledgerMerchantPayableNetFils - settlementNetPayoutFils - pendingUnbatchedFils;
+    const gapFils = Math.abs(activityGap) + settlementIntegrityGapFils;
+
+    await snapshot.query("COMMIT");
+    return {
+      periodFrom: input.from,
+      periodTo: input.to,
+      ledgerMerchantPayableNetFils,
+      settlementNetPayoutFils,
+      periodBatchPayoutFils,
+      settlementIntegrityGapFils,
+      pendingUnbatchedFils,
+      gapFils,
+      explained: gapFils === 0,
+    };
+  } catch (error) {
+    await snapshot.query("ROLLBACK");
+    throw error;
+  } finally {
+    snapshot.release();
   }
-
-  const ledgerMerchantPayableNetFils = Number(ledgerResult.rows[0]?.net ?? 0);
-  const settlementNetPayoutFils = Number(settlementResult.rows[0]?.total ?? 0);
-  const gapFils = ledgerMerchantPayableNetFils - settlementNetPayoutFils - pendingUnbatchedFils;
-
-  return {
-    periodFrom: input.from,
-    periodTo: input.to,
-    ledgerMerchantPayableNetFils,
-    settlementNetPayoutFils,
-    pendingUnbatchedFils,
-    gapFils,
-    explained: gapFils === 0,
-  };
 }
 
 export interface SettlementSummaryDto {

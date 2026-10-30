@@ -57,3 +57,31 @@ Real PostgreSQL on isolated `filspay_go_review` at local port 55439, never the r
 Ordinary settlement still does not claim manual credits, journaled manual adjustments, or paid-batch MDR ledger corrections into a future payout. Its unbatched capture selection still requires the exact batch business date, so a capture committed after that day's close can remain stranded. These are confirmed preexisting settlement coverage gaps, not corrected by cache maintenance. Including them requires a durable claim contract for journal-only adjustments and a reconciliation attribution rule for carry-forward activity. Root review owns the decision on expanding this checkpoint; no payment/deployment state was changed by this review.
 
 Final targeted checks: Go suite repeated with `-count=1` passed every package; `tsc -p scripts --noEmit` and `tsc -p apps/api --noEmit` passed; `git diff --check` passed. These results precede any further root changes and do not establish deployment or browser acceptance.
+
+## 0085 checkpoint: durable settlement coverage
+
+Implemented the previously listed money omissions in migration 0085 and `adjustments.go`:
+
+- Each payable journal leg for manual credits, journaled adjustments, CSV imports and deferred MDR corrections gets a unique allocation receipt identifying the consuming batch. Display-only cache corrections are excluded. Ledger history remains immutable.
+- A newly closed batch claims all unbatched capture/refund activity before its business-day end, including late prior-day commits. Original closed batches remain frozen; the next newly closed batch exports and pays the late capture once.
+- All refunds and signed adjustments are claimed once. Negative proceeds become merchant carry debt and withhold subsequent small daily proceeds until recovered. This fixes the whole-refund deferral approach, which could pay small daily captures forever while never recovering a larger refund.
+- Newly closed dates must be chronological per merchant. Closed/paid replay remains a no-op. Backfill must start with the earliest outstanding date.
+- Batch accounting is explicit: `net = gross - fee + adjustment + carryIn - carryOut`, with carry values nonpositive. Batch DTOs/outbox expose these components; existing payout trend net remains actual payout.
+- MDR recalculation of batches with carry or a negative recalculated payout posts a deferred correction rather than rewriting carry history. Unique adjustment claims put the correction in a future payout.
+- Reconciliation separates source activity attribution (`settlementNetPayoutFils`) from actual batch-date payouts (`periodBatchPayoutFils`). It independently checks each relevant batch's event gross, known immutable fees, signed adjustment receipts, carry continuity, accounting identity and actual paid payable/cash journal amounts. Missing/underpaid/corrupted batches cannot be called explained merely because events match the ledger. All report queries use one repeatable-read snapshot.
+
+Verification after environment restart, isolated real PostgreSQL `filspay_go_review`:
+
+- Fresh schema: all 79 migrations applied, including 0085.
+- Settlement API routes, input validation and reporting concurrency batch: 25 tests passed.
+- Go compiles; all packages pass except two unchanged locked assertions that describe replaced behavior: `TestCloseBatch_EligibleEventSelection` rejects old unbatched captures (new late-capture total 14749 vs old 4750), and `TestCloseBatch_CarriesRefundForwardWhenPayoutWouldGoNegative` expects zero claimed events (durable debt claims one). Tests were not edited in this resumed checkpoint. New previously prepared lifecycle regressions pass, including recovery over multiple small capture days.
+- Independent temporary PostgreSQL check: valid paid batch gap 0; absent payout journal gap 1950; one-fil underpayment gap 2; one-fil incorrect fee/gross gap 2. Every invalid case returns `explained:false`.
+- API/reporting strict typechecks pass. CSS diff independently reviewed using Impeccable context and detector: wrapping, narrow tables and touch targets preserve incumbent UI; browser acceptance remains root verification.
+
+Legacy events without immutable `netFeeFils` still use the existing fallback fee reconstruction. Historical paid MDR records without the explicit deferred marker use their payment timestamp for classification. These are migration-era data limitations requiring reconciliation when timestamps/metadata are absent or wrong.
+
+### Payout instruction ownership
+
+Normal and split Go payouts now create/validate the one durable disbursement instruction inside the same transaction as the payout journal and paid transition (`internal/payouts/instruction.go`). The shared historical advisory key serializes earlier writers. Existing duplicate or mismatched instructions fail visibly; no historical rows are deleted. Webhook endpoints are unnecessary for creating the payout instruction.
+
+Actual built CLI verification (`/tmp/payout-instruction-check.mjs`): normal merchant and 100% split merchant, each with a journaled 1009-fil adjustment and zero webhook endpoints; `run-batch` twice leaves exactly one 1009-fil instruction for each batch. Go full suite rerun still compiles and has only the same two locked behavior assertions listed above. No test files changed in the resumed source checkpoint.

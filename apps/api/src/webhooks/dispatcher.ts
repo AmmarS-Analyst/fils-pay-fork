@@ -5,7 +5,6 @@ import { withTransaction } from "../db/withTransaction.js";
 import { decodeEncryptionKey, decryptSecret } from "./secretCrypto.js";
 import { serializeWebhookBody, signPayload } from "./sign.js";
 import { buildEnvelope } from "./envelope.js";
-import { recordPayoutDisbursementEffect } from "./payoutDisbursement.js";
 import { WEBHOOK_DELIVERY_ID_HEADER, WEBHOOK_SIGNATURE_HEADER } from "./headers.js";
 import type { WebhookTransport } from "./transport.js";
 
@@ -38,7 +37,19 @@ type PreDeliveryEffect = (pool: Pool, payload: Record<string, unknown>) => Promi
 const PRE_DELIVERY_EFFECTS: Record<string, PreDeliveryEffect> = {
   "settlement.paid": async (pool, payload) => {
     const data = payload.data as { settlementBatchId: string; netPayoutFils: number };
-    await recordPayoutDisbursementEffect(pool, data.settlementBatchId, Number(data.netPayoutFils));
+    if (Number(data.netPayoutFils) <= 0) return;
+    // Payout transactions own instructions. Delivery only validates their
+    // existence; registering or replaying a webhook must never move money.
+    await withTransaction(pool, async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`payout-disbursement:${data.settlementBatchId}`]);
+      const instruction = await client.query<{count: string; amount: string}>(
+        `SELECT count(*)::text AS count, COALESCE(sum(amount_fils),0)::text AS amount
+           FROM settlement_payout_disbursements WHERE settlement_batch_id=$1`, [data.settlementBatchId]);
+      const current = instruction.rows[0]!;
+      if (current.count !== "1" || Number(current.amount) !== Number(data.netPayoutFils)) {
+        throw new Error("payout instruction missing or inconsistent; reconcile the payout before notification");
+      }
+    });
   },
 };
 

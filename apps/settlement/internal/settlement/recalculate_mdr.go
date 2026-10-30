@@ -35,12 +35,15 @@ type RecalcResult struct {
 
 // batchRow is one settlement_batches row as read by the recalculation scan.
 type batchRow struct {
-	id            uuid.UUID
-	batchDate     time.Time
-	status        string
-	grossFils     money.Fils
-	feeFils       money.Fils
-	netPayoutFils money.Fils
+	id             uuid.UUID
+	batchDate      time.Time
+	status         string
+	grossFils      money.Fils
+	feeFils        money.Fils
+	netPayoutFils  money.Fils
+	adjustmentFils money.Fils
+	carryInFils    money.Fils
+	carryOutFils   money.Fils
 }
 
 // RecalculateMDR re-derives the fee on a merchant's closed and paid batches in
@@ -65,7 +68,7 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils
+		SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, adjustment_fils, carry_in_fils, carry_out_fils
 		  FROM settlement_batches
 		 WHERE merchant_id = $1 AND batch_date >= $2 AND batch_date < $3
 		   AND status <> 'open'
@@ -79,7 +82,7 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 	for rows.Next() {
 		var b batchRow
 		var gross, fee, net int64
-		if err := rows.Scan(&b.id, &b.batchDate, &b.status, &gross, &fee, &net); err != nil {
+		if err := rows.Scan(&b.id, &b.batchDate, &b.status, &gross, &fee, &net, &b.adjustmentFils, &b.carryInFils, &b.carryOutFils); err != nil {
 			rows.Close()
 			return RecalcResult{}, fmt.Errorf("settlement: RecalculateMDR: scan batch: %w", err)
 		}
@@ -100,24 +103,23 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 		if err != nil {
 			return RecalcResult{}, err
 		}
-		currentFee := b.feeFils
-		if b.status == "paid" {
-			prior, err := priorMdrAdjustment(ctx, tx, b.id)
-			if err != nil {
-				return RecalcResult{}, err
-			}
-			currentFee += prior
+		// Explicit deferred corrections remain outside the frozen fee even
+		// when a later terms change would make this batch positive again.
+		prior, err := priorMdrAdjustment(ctx, tx, b.id)
+		if err != nil {
+			return RecalcResult{}, err
 		}
+		currentFee := b.feeFils + prior
 		diff := newFee - currentFee
 		if diff == 0 {
 			continue
 		}
-		newNetPayout := b.grossFils - newFee
-		// am: posts against the OLD batch id so it never lands in a new payout?? fixed in FP-244 i think
-		if err := postMdrAdjustment(ctx, tx, merchantID, b.id, diff, b.status == "paid"); err != nil {
+		newNetPayout := b.grossFils - newFee + b.adjustmentFils + b.carryInFils - b.carryOutFils
+		deferToNextBatch := prior != 0 || b.status == "paid" || b.carryInFils != 0 || b.carryOutFils != 0 || newNetPayout < 0
+		if err := postMdrAdjustment(ctx, tx, merchantID, b.id, diff, deferToNextBatch); err != nil {
 			return RecalcResult{}, err
 		}
-		if b.status != "paid" {
+		if !deferToNextBatch {
 			if _, err := tx.Exec(ctx, `
 				UPDATE settlement_batches SET fee_fils = $2, net_payout_fils = $3 WHERE id = $1
 			`, b.id, int64(newFee), int64(newNetPayout)); err != nil {
@@ -150,7 +152,7 @@ func priorMdrAdjustment(ctx context.Context, tx pgx.Tx, batchID uuid.UUID) (mone
 		  FROM ledger_entries
 		 WHERE settlement_batch_id = $1
 		   AND account_id = 'platform_fee_revenue'
-		   AND (description = 'MDR recalculation adjustment: paid batch'
+		   AND (description IN ('MDR recalculation adjustment: paid batch', 'MDR recalculation adjustment: deferred batch')
                 OR (description = 'MDR recalculation adjustment'
                     AND occurred_at >= (SELECT paid_at FROM settlement_batches WHERE id = $1)))
 	`, batchID).Scan(&net)
@@ -223,7 +225,7 @@ func postMdrAdjustment(ctx context.Context, tx pgx.Tx, merchantID, batchID uuid.
 
 	description := "MDR recalculation adjustment"
 	if paid {
-		description += ": paid batch"
+		description += ": deferred batch"
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO ledger_entries
