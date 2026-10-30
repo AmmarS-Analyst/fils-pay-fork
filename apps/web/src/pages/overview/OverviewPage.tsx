@@ -1,5 +1,7 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import { getPayoutTrends, getTopLinks, getVolumes } from "../../api/analytics.js";
 import { describeError } from "../../api/client.js";
 import { StalenessBadge } from "../../components/StalenessBadge.js";
@@ -76,14 +78,8 @@ export function OverviewPage() {
           void load();
         }}
       >
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          To (exclusive)
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+        <DateInput label="From" value={from} onValueChange={setFrom} />
+        <DateInput label="To (exclusive)" value={to} onValueChange={setTo} />
         <label>
           Top links
           <input
@@ -156,6 +152,7 @@ export function OverviewPage() {
               <th className="dash-num">Fee</th>
               <th className="dash-num">Net payout</th>
               <th>Paid</th>
+              <RowLinkHeader />
             </tr>
           </thead>
           <tbody>
@@ -169,11 +166,12 @@ export function OverviewPage() {
                 <td className="dash-num">{bhd(point.feeFils)}</td>
                 <td className="dash-num">{bhd(point.netPayoutFils)}</td>
                 <td>{dateTime(point.paidAt)}</td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/settlement/${point.settlementBatchId}`} label={`View settlement batch ${point.batchDate}`} /></td>
               </tr>
             ))}
             {payouts && payouts.points.length === 0 ? (
               <tr>
-                <td colSpan={6}>No settled batches in this window.</td>
+                <td colSpan={7}>No settled batches in this window.</td>
               </tr>
             ) : null}
           </tbody>
@@ -195,6 +193,7 @@ export function OverviewPage() {
               <th>Description</th>
               <th className="dash-num">Amount</th>
               <th>Paid at</th>
+              <RowLinkHeader />
             </tr>
           </thead>
           <tbody>
@@ -207,11 +206,12 @@ export function OverviewPage() {
                 <td>{dash(link.description)}</td>
                 <td className="dash-num">{bhd(link.amountFils)}</td>
                 <td>{dateTime(link.paidAt)}</td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/payment-links/${link.id}`} label={`View payment link ${link.reference ?? link.id}`} /></td>
               </tr>
             ))}
             {topLinks && topLinks.links.length === 0 ? (
               <tr>
-                <td colSpan={5}>No paid payment links in this window.</td>
+                <td colSpan={6}>No paid payment links in this window.</td>
               </tr>
             ) : null}
           </tbody>

@@ -54,3 +54,23 @@ live capacity measurement, physical-device test or complete browser-engine matri
 The existing Vite warning about the helpers module's mixed static/dynamic imports
 remains; it does not fail the build. Deployment and backend configuration were
 outside this change.
+
+## Usability follow-up
+
+- Navigable table rows now have a trailing, keyboard-accessible details arrow.
+  Existing row links and inline actions remain available; financial/log rows
+  without a detail route do not receive an invented destination.
+- All date controls support typed `DD/MM/YYYY` (or `DD/MM/YYYY HH:mm`) with a
+  full-size native calendar trigger. Browser locale no longer determines the
+  displayed field order. State/API values retain their original ISO date or
+  local-datetime representation and existing timezone handling.
+- Invalid calendar days, non-leap-year February 29 and invalid times are rejected.
+  Admin date displays and merchant timestamps also use day/month/year ordering.
+- Creation pages have a bordered Back control before the title, grouped fields,
+  and a separate Cancel/submit footer. Nested operational forms use consistent
+  panels and compact field groups. The webhook secret acknowledgement is preserved.
+- Independent browser QA verified typing, calendar updates/opening, detail arrows,
+  Back/Cancel and 320px/390px containment. A hidden details-header positioning bug
+  found during the browser pass was corrected before completion.
+- Frontend unit tests now total 11 passing, including date parsing/leap-year tests.
+  The real 18-group browser flow also checks the calendar's 44px touch target.

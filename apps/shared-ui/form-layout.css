@@ -1,0 +1,26 @@
+:is(.dash-main, .admin-main) :is(.dash-form, .admin-form):not(.dash-form-inline):not(.admin-form-inline) {
+  max-width: 760px; padding: 20px; border: 1px solid var(--fp-line); border-radius: 12px; background: var(--fp-surface); gap: 18px;
+}
+.fp-create-page { max-width: 820px; }
+.fp-create-page a.fp-back-link { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 7px 11px; margin-bottom: 18px; border: 1px solid var(--fp-control); border-radius: 6px; color: var(--fp-secondary); background: var(--fp-surface); text-decoration: none; font-size: 12px; font-weight: 550; }
+.fp-create-page a.fp-back-link:hover { color: #fff; background: var(--fp-raised); }
+.fp-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 18px; }
+.fp-form-field { min-width: 0; }
+.fp-form-field input { width: 100%; }
+form.dash-form.fp-create-form input:not(.fp-date-native) { min-height: 46px; }
+.fp-form-field .dash-hint { margin-top: 6px; }
+.fp-form-wide { grid-column: 1 / -1; }
+.fp-form-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding-top: 16px; border-top: 1px solid var(--fp-line); }
+:is(.dash-main, .admin-main) .fp-form-footer a { text-decoration: none; }
+.admin-main .fp-grid-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+.admin-main .fp-grid-form > :is(p, fieldset, button, label:has(textarea), label:has(input[type="checkbox"])) { grid-column: 1 / -1; }
+.admin-main .fp-grid-form > label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; gap: 9px; }
+.admin-main .fp-grid-form > label:first-child:has(input[placeholder="merchant UUID"]),
+.admin-main .fp-grid-form > label:first-child:has(select) { grid-column: 1 / -1; }
+.admin-main .admin-form:not(.admin-form-inline) > button[type="submit"] { align-self: flex-end; justify-self: end; }
+.admin-main .admin-form textarea { width: 100%; }
+@media (max-width: 600px) {
+  :is(.dash-main, .admin-main) :is(.dash-form, .admin-form):not(.dash-form-inline):not(.admin-form-inline) { padding: 16px; }
+  .fp-form-grid, .admin-main .fp-grid-form { grid-template-columns: minmax(0, 1fr); }
+  .fp-form-footer { justify-content: space-between; }
+}

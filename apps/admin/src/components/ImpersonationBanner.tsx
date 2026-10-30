@@ -43,7 +43,7 @@ export function ImpersonationBanner() {
         <strong>You are viewing as a merchant.</strong>{" "}
         <span>
           Active grant for <code>{label}</code>, expiring{" "}
-          {new Date(impersonation.expiresAt).toLocaleString()}. Merchant screens in the dashboard are
+          {new Date(impersonation.expiresAt).toLocaleString("en-GB", { timeZone: "Asia/Bahrain" })}. Merchant screens in the dashboard are
           acting with this merchant&apos;s least-privileged (support) role.
         </span>
         {error ? <div className="impersonation-banner-error">Could not end it: {error}</div> : null}

@@ -1,5 +1,7 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import { listSettlementBatches } from "../../api/settlement.js";
 import { describeError } from "../../api/client.js";
 import { Pagination } from "../../components/Pagination.js";
@@ -67,14 +69,8 @@ export function SettlementBatchListPage() {
 
       <fieldset className="dash-filters">
         <legend>Batch date</legend>
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          To (exclusive)
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+        <DateInput label="From" value={from} onValueChange={setFrom} />
+        <DateInput label="To (exclusive)" value={to} onValueChange={setTo} />
       </fieldset>
 
       <fieldset className="dash-filters">
@@ -104,6 +100,7 @@ export function SettlementBatchListPage() {
               <th className="dash-num">Net payout</th>
               <th>Closed</th>
               <th>Paid</th>
+              <RowLinkHeader />
             </tr>
           </thead>
           <tbody>
@@ -120,11 +117,12 @@ export function SettlementBatchListPage() {
                 <td className="dash-num">{bhd(batch.netPayoutFils)}</td>
                 <td>{dateTime(batch.closedAt)}</td>
                 <td>{dateTime(batch.paidAt)}</td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/settlement/${batch.id}`} label={`View settlement batch ${batch.batchDate}`} /></td>
               </tr>
             ))}
             {batches.length === 0 && !loading ? (
               <tr>
-                <td colSpan={7}>No settlement batches match these filters.</td>
+                <td colSpan={8}>No settlement batches match these filters.</td>
               </tr>
             ) : null}
           </tbody>

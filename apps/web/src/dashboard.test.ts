@@ -67,7 +67,7 @@ test("localDateTimeToIso rejects garbage instead of sending Invalid Date", () =>
 
 test("dateTime shows Bahrain time whatever the browser zone is", () => {
   // 21:30 UTC is already the next day in Bahrain
-  assert.match(dateTime("2026-10-30T21:30:00Z"), /31 Oct 2026.*00:30/);
+  assert.match(dateTime("2026-10-30T21:30:00Z"), /31\/10\/2026.*00:30/);
   assert.equal(dateTime(null), "—");
   assert.equal(dateTime("garbage"), "—");
 });

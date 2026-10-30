@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import { listMerchants } from "../../api/merchants.js";
 import { bulkApproveKyc } from "../../api/merchantsBulk.js";
 import { describeError } from "../../api/client.js";
@@ -174,6 +175,7 @@ export function MerchantListPage() {
             <th>MDR</th>
             <th>Mode</th>
             <th>Created</th>
+            <RowLinkHeader />
           </tr>
         </thead>
         <tbody>
@@ -198,12 +200,13 @@ export function MerchantListPage() {
               <td>{merchant.kycPassed ? "passed" : "not passed"}</td>
               <td>{(merchant.mdrBps / 100).toFixed(2)}%</td>
               <td>{merchant.testMode ? "test" : "live"}</td>
-              <td>{new Date(merchant.createdAt).toLocaleDateString()}</td>
+              <td>{new Date(merchant.createdAt).toLocaleDateString("en-GB", { timeZone: "Asia/Bahrain" })}</td>
+              <td className="fp-row-link-cell"><RowLink to={`/merchants/${merchant.id}`} label={`View merchant ${merchant.displayName}`} /></td>
             </tr>
           ))}
           {merchants.length === 0 && !loading ? (
             <tr>
-              <td colSpan={8}>No merchants match this search.</td>
+              <td colSpan={9}>No merchants match this search.</td>
             </tr>
           ) : null}
         </tbody>

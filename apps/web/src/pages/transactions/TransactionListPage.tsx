@@ -1,5 +1,7 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import { listTransactions } from "../../api/transactions.js";
 import { describeError } from "../../api/client.js";
 import { Pagination } from "../../components/Pagination.js";
@@ -101,18 +103,8 @@ export function TransactionListPage() {
 
       <fieldset className="dash-filters">
         <legend>Filter</legend>
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          {/* Exclusive, because the endpoint's own predicate is
-              `occurred_at < to` — labelled rather than quietly shifted by a
-              day here, which would make this page and the API disagree about
-              what a filter means. */}
-          To (exclusive)
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+        <DateInput label="From" value={from} onValueChange={setFrom} />
+        <DateInput label="To (exclusive)" value={to} onValueChange={setTo} />
         <label>
           Search
           <input
@@ -139,6 +131,7 @@ export function TransactionListPage() {
               <th className="dash-num">Captured</th>
               <th className="dash-num">Refunded</th>
               <th>Acquirer reference</th>
+              <RowLinkHeader />
             </tr>
           </thead>
           <tbody>
@@ -157,11 +150,12 @@ export function TransactionListPage() {
                 <td>
                   <code>{truncateMiddle(txn.acquirerReference, 20)}</code>
                 </td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/transactions/${txn.id}`} label={`View transaction ${txn.reference ?? txn.id}`} /></td>
               </tr>
             ))}
             {transactions.length === 0 && !loading ? (
               <tr>
-                <td colSpan={7}>No transactions match these filters.</td>
+                <td colSpan={8}>No transactions match these filters.</td>
               </tr>
             ) : null}
           </tbody>

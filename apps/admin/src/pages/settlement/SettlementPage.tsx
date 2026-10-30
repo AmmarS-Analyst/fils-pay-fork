@@ -1,3 +1,4 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useState } from "react";
 import { formatBhd, toFils } from "@filspay/money";
 import { rebuildAnalytics, rebuildBalances, runBatch } from "../../api/settlement.js";
@@ -147,10 +148,7 @@ export function SettlementPage() {
         }
       >
         <form className="admin-form" onSubmit={(e) => void handleRunBatch(e)}>
-          <label>
-            Business date
-            <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
+          <DateInput label="Business date" value={date} onValueChange={setDate} required />
           <label>
             Merchant id (optional — leave blank to run every eligible merchant)
             <input
@@ -349,7 +347,7 @@ export function SettlementPage() {
           </p>
         }
       >
-        <form className="admin-form" onSubmit={(e) => void handleRecalculateMdr(e)}>
+        <form className="admin-form fp-grid-form" onSubmit={(e) => void handleRecalculateMdr(e)}>
           <label>
             Merchant id
             <input
@@ -359,14 +357,8 @@ export function SettlementPage() {
               required
             />
           </label>
-          <label>
-            From (inclusive)
-            <input type="date" value={mdrFrom} onChange={(e) => setMdrFrom(e.target.value)} required />
-          </label>
-          <label>
-            To (exclusive)
-            <input type="date" value={mdrTo} onChange={(e) => setMdrTo(e.target.value)} required />
-          </label>
+          <DateInput label="From (inclusive)" value={mdrFrom} onValueChange={setMdrFrom} required />
+          <DateInput label="To (exclusive)" value={mdrTo} onValueChange={setMdrTo} required />
           <button type="submit" disabled={mdrBusy}>
             {mdrBusy ? "Recalculating…" : "Recalculate MDR"}
           </button>

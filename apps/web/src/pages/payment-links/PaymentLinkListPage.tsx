@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import { listPaymentLinks } from "../../api/paymentLinks.js";
 import { describeError } from "../../api/client.js";
 import { useDashboardAuth } from "../../auth/DashboardAuthContext.js";
@@ -101,6 +102,7 @@ export function PaymentLinkListPage() {
               <th>Expires</th>
               <th>Paid</th>
               <th>Canceled</th>
+              <RowLinkHeader />
             </tr>
           </thead>
           <tbody>
@@ -117,11 +119,12 @@ export function PaymentLinkListPage() {
                 <td>{dateTime(link.expiresAt)}</td>
                 <td>{dateTime(link.paidAt)}</td>
                 <td>{dateTime(link.canceledAt)}</td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/payment-links/${link.id}`} label={`View payment link ${link.reference ?? link.id}`} /></td>
               </tr>
             ))}
             {links.length === 0 && !loading ? (
               <tr>
-                <td colSpan={7}>No payment links match these filters.</td>
+                <td colSpan={8}>No payment links match these filters.</td>
               </tr>
             ) : null}
           </tbody>

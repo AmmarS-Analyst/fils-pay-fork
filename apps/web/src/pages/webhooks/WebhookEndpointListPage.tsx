@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { RowLink, RowLinkHeader } from "../../../../shared-ui/RowLink.js";
 import {
   deleteWebhookEndpoint,
   listWebhookEndpoints,
@@ -106,6 +107,7 @@ export function WebhookEndpointListPage() {
               <th>Status</th>
               <th>Created</th>
               <th>Actions</th>
+              <RowLinkHeader />
             </tr>
           </thead>
           <tbody>
@@ -139,11 +141,12 @@ export function WebhookEndpointListPage() {
                     Delete
                   </button>
                 </td>
+                <td className="fp-row-link-cell"><RowLink to={`/dashboard/webhooks/${endpoint.id}`} label={`View webhook endpoint ${endpoint.url}`} /></td>
               </tr>
             ))}
             {endpoints.length === 0 && !loading && !error ? (
               <tr>
-                <td colSpan={5}>No webhook endpoints registered.</td>
+                <td colSpan={6}>No webhook endpoints registered.</td>
               </tr>
             ) : null}
           </tbody>

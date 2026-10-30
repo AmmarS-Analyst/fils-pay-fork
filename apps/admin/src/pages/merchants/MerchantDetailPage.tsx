@@ -1,3 +1,4 @@
+import { DateInput } from "../../../../shared-ui/DateInput.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { formatBhd, parseBhdToFils, toFils } from "@filspay/money";
@@ -267,13 +268,13 @@ export function MerchantDetailPage() {
         <dt>Current negotiated rate</dt>
         <dd>
           {detail.currentFeeSchedule
-            ? `${(detail.currentFeeSchedule.mdrBps / 100).toFixed(2)}% (${detail.currentFeeSchedule.mdrBps} bps), effective ${new Date(detail.currentFeeSchedule.effectiveFrom).toLocaleDateString()}`
+            ? `${(detail.currentFeeSchedule.mdrBps / 100).toFixed(2)}% (${detail.currentFeeSchedule.mdrBps} bps), effective ${new Date(detail.currentFeeSchedule.effectiveFrom).toLocaleDateString("en-GB", { timeZone: "Asia/Bahrain" })}`
             : "no negotiated schedule on file (uses MDR above)"}
         </dd>
         <dt>Mode</dt>
         <dd>{merchant.testMode ? "test" : "live"}</dd>
         <dt>Created</dt>
-        <dd>{new Date(merchant.createdAt).toLocaleString()}</dd>
+        <dd>{new Date(merchant.createdAt).toLocaleString("en-GB", { timeZone: "Asia/Bahrain" })}</dd>
         {profile ? (
           <>
             <dt>Legal name</dt>
@@ -301,7 +302,7 @@ export function MerchantDetailPage() {
       {detail.balance ? (
         <p>
           Cached payable: <strong>{bhd(detail.balance.cachedPayableFils)}</strong> (updated{" "}
-          {new Date(detail.balance.updatedAt).toLocaleString()}). The ledger remains authoritative;
+          {new Date(detail.balance.updatedAt).toLocaleString("en-GB", { timeZone: "Asia/Bahrain" })}). The ledger remains authoritative;
           this figure is a cache, rebuildable from Settlement ops.
         </p>
       ) : (
@@ -367,7 +368,7 @@ export function MerchantDetailPage() {
           </p>
         }
       >
-        <form className="admin-form" onSubmit={(e) => void handleIssueCredit(e)}>
+        <form className="admin-form fp-grid-form" onSubmit={(e) => void handleIssueCredit(e)}>
           <label>
             Amount (BD, up to 3 decimals)
             <input
@@ -389,15 +390,7 @@ export function MerchantDetailPage() {
               <option value="correction">Correction</option>
             </select>
           </label>
-          <label>
-            Effective date
-            <input
-              type="date"
-              required
-              value={creditEffectiveDate}
-              onChange={(e) => setCreditEffectiveDate(e.target.value)}
-            />
-          </label>
+          <DateInput label="Effective date" value={creditEffectiveDate} onValueChange={setCreditEffectiveDate} required />
           <label>
             <input
               type="checkbox"
@@ -465,7 +458,7 @@ export function MerchantDetailPage() {
                   <td>{review.outcome}</td>
                   <td>{review.reviewerIdentifier}</td>
                   <td>{review.notes ?? "-"}</td>
-                  <td>{new Date(review.reviewedAt).toLocaleString()}</td>
+                  <td>{new Date(review.reviewedAt).toLocaleString("en-GB", { timeZone: "Asia/Bahrain" })}</td>
                 </tr>
               ))}
             </tbody>
@@ -515,9 +508,9 @@ export function MerchantDetailPage() {
                     <code>{key.prefix}</code>
                   </td>
                   <td>{key.label ?? "-"}</td>
-                  <td>{new Date(key.createdAt).toLocaleDateString()}</td>
-                  <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "never"}</td>
-                  <td>{key.revokedAt ? new Date(key.revokedAt).toLocaleString() : "-"}</td>
+                  <td>{new Date(key.createdAt).toLocaleDateString("en-GB", { timeZone: "Asia/Bahrain" })}</td>
+                  <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString("en-GB", { timeZone: "Asia/Bahrain" }) : "never"}</td>
+                  <td>{key.revokedAt ? new Date(key.revokedAt).toLocaleString("en-GB", { timeZone: "Asia/Bahrain" }) : "-"}</td>
                   <td>
                     {key.revokedAt ? null : (
                       <RequireRole
@@ -589,7 +582,7 @@ export function MerchantDetailPage() {
                   <td>
                     <code>{endpoint.secretPrefix}</code>
                   </td>
-                  <td>{new Date(endpoint.createdAt).toLocaleDateString()}</td>
+                  <td>{new Date(endpoint.createdAt).toLocaleDateString("en-GB", { timeZone: "Asia/Bahrain" })}</td>
                 </tr>
               ))}
             </tbody>

@@ -61,7 +61,9 @@ if (!process.env.DATABASE_URL?.includes('filspay_browser')) throw new Error('Use
       await merchant.getByLabel('Amount in fils',{exact:true}).fill('1000');
       await merchant.getByLabel('Reference (optional)',{exact:true}).fill(`browser-audit-${Date.now()}`);
       await merchant.getByLabel('Description (optional)',{exact:true}).fill('Local verification payment');
-      await merchant.getByLabel('Expires at',{exact:true}).fill('2099-01-01T12:00');
+      const dateTarget = await merchant.getByLabel('Open calendar for Expires at',{exact:true}).boundingBox();
+      assert.ok(dateTarget && dateTarget.width >= 44 && dateTarget.height >= 44, 'calendar must have a full touch target');
+      await merchant.getByLabel('Expires at',{exact:true}).fill('01/01/2099 12:00');
       await merchant.getByRole('button',{name:'Create payment link',exact:true}).click();
       await merchant.waitForURL(/\/dashboard\/payment-links\/[0-9a-f-]+$/);
       const checkoutLink = merchant.locator('a[target="_blank"]').first();

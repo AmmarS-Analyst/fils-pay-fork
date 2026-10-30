@@ -24,7 +24,7 @@ export function dash(value: string | number | null | undefined): string {
 const BAHRAIN_FORMAT = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Bahrain",
   day: "2-digit",
-  month: "short",
+  month: "2-digit",
   year: "numeric",
   hour: "2-digit",
   minute: "2-digit",
