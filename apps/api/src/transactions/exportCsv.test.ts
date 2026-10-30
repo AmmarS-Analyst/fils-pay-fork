@@ -193,3 +193,21 @@ test("a reference containing a comma or a quote is CSV-escaped", async () => {
 
   assert.ok(dataLine.includes('"inv-1,""urgent"""'));
 });
+
+test("rows sharing a timestamp across a page boundary are all exported", async () => {
+  const merchantId = await createMerchant();
+  // Five transactions at the very same instant, paged two at a time: the old
+  // `occurred_at > cursor` pagination returned only the first page.
+  for (let i = 0; i < 5; i++) {
+    await insertTransaction(merchantId, {
+      status: "captured",
+      amountFils: 1000 + i,
+      capturedFils: 1000 + i,
+      reference: `same-ts-${i}`,
+      occurredAt: "2026-04-02T10:00:00.123456Z",
+    });
+  }
+  const csv = await buildTransactionsExportCsv(pool, { merchantId }, 2);
+  const lines = csv.split("\n");
+  assert.equal(lines.length, 1 + 5, csv);
+});
