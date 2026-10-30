@@ -506,3 +506,44 @@ func TestCloseBatchNetPayoutIsWholeFils(t *testing.T) {
 		t.Errorf("stored net_payout_fils = %q, want %d (the figure CloseBatch returned)", storedText, result.NetPayoutFils)
 	}
 }
+
+// The scheme file amount must equal amount_fils / 1000 (ADR-0002) and the
+// truncated fils must be journaled to scheme_rounding_residue.
+func TestCloseBatch_SchemeAmountMatchesFilsAndResidueIsJournaled(t *testing.T) {
+	pool := mustPool(t)
+	const mdrBps = 250
+	merchantID := insertActiveMerchant(t, pool, mdrBps)
+	businessDate := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	start, _ := BusinessDayWindow(businessDate)
+
+	insertCaptureEvent(t, pool, merchantID, mdrBps, 93_275, start.Add(time.Hour))
+
+	result, err := CloseBatch(context.Background(), pool, merchantID, businessDate)
+	if err != nil {
+		t.Fatalf("CloseBatch: %v", err)
+	}
+
+	var amountFils int64
+	var amount string
+	err = pool.QueryRow(context.Background(), `
+		SELECT amount_fils, amount::text FROM scheme_export_lines WHERE settlement_batch_id = $1
+	`, result.BatchID).Scan(&amountFils, &amount)
+	if err != nil {
+		t.Fatalf("query scheme_export_lines: %v", err)
+	}
+	if amountFils != 93_270 || amount != "93.27" {
+		t.Errorf("line = (%d fils, %s BD), want (93270 fils, 93.27 BD); the file must not round up", amountFils, amount)
+	}
+
+	var residue int64
+	err = pool.QueryRow(context.Background(), `
+		SELECT COALESCE(SUM(amount_fils), 0) FROM ledger_entries
+		 WHERE merchant_id = $1 AND account_id = 'scheme_rounding_residue' AND direction = 'debit'
+	`, merchantID).Scan(&residue)
+	if err != nil {
+		t.Fatalf("query residue: %v", err)
+	}
+	if residue != 5 {
+		t.Errorf("scheme_rounding_residue = %d fils, want 5", residue)
+	}
+}

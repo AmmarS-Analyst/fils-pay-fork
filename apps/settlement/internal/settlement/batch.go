@@ -249,12 +249,29 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 
 	for i, line := range lines {
 		truncated := TruncateToSchemeAmount(line.grossFils)
+		// amount comes from the truncated fils. gross/1000 into NUMERIC(10,2) rounded
+		// half-up, so the file claimed more than the ledger booked (123 of 260 lines
+		// in the 2026-09-14 export).
 		_, err = tx.Exec(ctx, `
 			INSERT INTO scheme_export_lines (settlement_batch_id, transaction_id, amount_fils, amount, line_sequence)
-			VALUES ($1, $2, $3, $4, $5)
-		`, batchID, line.transactionID, int64(truncated), SchemeAmountBD(line.grossFils), i+1)
+			VALUES ($1, $2, $3, $3::numeric / 1000, $4)
+		`, batchID, line.transactionID, int64(truncated), i+1)
 		if err != nil {
 			return BatchResult{}, fmt.Errorf("settlement: CloseBatch: insert scheme export line: %w", err)
+		}
+
+		// ADR-0002: journal the 0-9 fils the scheme never settles (nothing posted it).
+		if residue := line.grossFils - truncated; residue > 0 {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO ledger_entries
+				  (entry_group_id, merchant_id, transaction_id, account_id, direction, amount_fils, occurred_at, description)
+				VALUES
+				  ($1, $2, $3, 'card_scheme_clearing',    'credit', $4, now(), 'scheme export: rounding residue'),
+				  ($1, $2, $3, 'scheme_rounding_residue', 'debit',  $4, now(), 'scheme export: rounding residue')
+			`, uuid.New(), merchantID, line.transactionID, int64(residue))
+			if err != nil {
+				return BatchResult{}, fmt.Errorf("settlement: CloseBatch: post scheme residue: %w", err)
+			}
 		}
 	}
 
