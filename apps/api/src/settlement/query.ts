@@ -374,8 +374,11 @@ export async function getSettlementSummary(
   const windowEnd = bahrainLocalMidnightUtc(input.to);
 
   const result = await pool.query<SettlementSummaryRow>(
+    // Sum each capture event's own amount. Summing t.captured_fils (the
+    // running total) once per event counted a 3-part capture three times:
+    // Delta Wholesale's summary was ~38% above its batches.
     `WITH captured AS (
-       SELECT t.id, t.captured_fils
+       SELECT t.id, te.amount_fils AS captured_fils
          FROM transactions t
          JOIN transaction_events te ON te.transaction_id = t.id
         WHERE t.merchant_id = $1

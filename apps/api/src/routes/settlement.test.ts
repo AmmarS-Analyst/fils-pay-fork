@@ -527,3 +527,29 @@ test("reconciliation pending uses the fee capture actually charged (fee schedule
   assert.equal(report.pendingUnbatchedFils, 10_000 - 400, "4% schedule rate, not the 2.5% on the merchant row");
   assert.equal(report.gapFils, 0);
 });
+
+test("GET /v1/settlement/summary counts a multi-part capture once, at the amounts actually captured", async () => {
+  const { rawKey } = await createApprovedMerchantWithApiKey("summary-multi-capture", 250);
+  const txn = await authorize(rawKey, 9_000);
+  for (const part of [3_000, 3_000, 3_000]) {
+    const res = await app.inject({
+      method: "POST",
+      url: `/v1/transactions/${txn.id}/capture`,
+      headers: { ...authHeader(rawKey), "idempotency-key": randomUUID() },
+      payload: { amountFils: part },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+  }
+
+  const businessDate = todayBahrainDateString();
+  const res = await app.inject({
+    method: "GET",
+    url: `/v1/settlement/summary?from=${businessDate}&to=${addOneCalendarDay(businessDate)}`,
+    headers: authHeader(rawKey),
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const body = res.json() as { transactionCount: number; totalCapturedFils: number };
+  assert.equal(body.transactionCount, 1);
+  // Old query: 3,000 + 6,000 + 9,000 running totals = 18,000.
+  assert.equal(body.totalCapturedFils, 9_000);
+});
