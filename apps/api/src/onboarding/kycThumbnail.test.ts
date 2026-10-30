@@ -5,6 +5,8 @@
  * JPEG/PNG without adding files to the repo.
  */
 import assert from "node:assert/strict";
+import { crc32 } from "node:zlib";
+import { AppError } from "../lib/errors.js";
 import { test } from "node:test";
 import sharp from "sharp";
 import { detectFileType } from "./fileSignature.js";
@@ -65,4 +67,33 @@ test("a PDF returns null rather than throwing or attempting a conversion", async
   const pdf = Buffer.from("%PDF-1.4\n1 0 obj\n<< >>\nendobj\n%%EOF");
   assert.equal(detectFileType(pdf), "pdf");
   assert.equal(await generateKycThumbnail(pdf, "pdf"), null);
+});
+
+test("an image claiming a huge size is refused, not decoded", async () => {
+  // A few dozen bytes whose header says 10000x10000 (100 MP): over our limit,
+  // under sharp's default, so it used to be attempted.
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(10_000, 0);
+  ihdr.writeUInt32BE(10_000, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // RGB
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", Buffer.from([0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01])),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+
+  await assert.rejects(
+    () => generateKycThumbnail(png, "png"),
+    (err: unknown) => err instanceof AppError && err.statusCode === 422 && err.code === "image_too_large",
+  );
 });

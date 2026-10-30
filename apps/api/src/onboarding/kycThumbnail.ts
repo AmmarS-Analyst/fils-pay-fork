@@ -1,10 +1,12 @@
 import sharp from "sharp";
+import { UnprocessableEntityError } from "../lib/errors.js";
 import type { DetectedFileType } from "./fileSignature.js";
 
 /**
  * Longest side, in pixels.
  */
 const THUMBNAIL_MAX_DIMENSION_PX = 320;
+const MAX_INPUT_PIXELS = 50_000_000;
 
 export interface GeneratedThumbnail {
   buffer: Buffer;
@@ -27,11 +29,19 @@ export async function generateKycThumbnail(
   if (detectedType !== "jpeg" && detectedType !== "png") {
     return null;
   }
-  // YA: the 8 MiB upload cap protects us here
-  // FH: sharp's default pixel limit is ~268MP, a tiny png can decode huge. copilot suggests limitInputPixels
-  const resized = await sharp(buffer)
-    .resize(THUMBNAIL_MAX_DIMENSION_PX, THUMBNAIL_MAX_DIMENSION_PX, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 70 })
-    .toBuffer();
-  return { buffer: resized, mimeType: "image/jpeg" };
+  // The 8 MiB upload cap limits the file, not the decoded size: a tiny PNG can
+  // claim huge dimensions and sharp's default limit is ~268 megapixels (about
+  // 800 MB of RGB). Documents and photos here are far smaller than 50 MP.
+  try {
+    const resized = await sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS })
+      .resize(THUMBNAIL_MAX_DIMENSION_PX, THUMBNAIL_MAX_DIMENSION_PX, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 70 })
+      .toBuffer();
+    return { buffer: resized, mimeType: "image/jpeg" };
+  } catch (err) {
+    if (err instanceof Error && /pixel limit/i.test(err.message)) {
+      throw new UnprocessableEntityError("image_too_large", "the image dimensions are too large");
+    }
+    throw err;
+  }
 }
