@@ -2,3 +2,4 @@
 **/dist
 .git
 ops/.env
+ops/.env.prod

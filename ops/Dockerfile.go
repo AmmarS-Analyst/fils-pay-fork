@@ -7,6 +7,6 @@ RUN go mod download
 COPY apps/settlement/ ./
 RUN CGO_ENABLED=0 go build -o /out/settlement ./cmd/settlement
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/settlement ./settlement

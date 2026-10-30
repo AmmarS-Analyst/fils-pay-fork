@@ -1,0 +1,180 @@
+# Hosted stack for one server with 1 vCPU / 2 GB RAM. The API is capped at
+# 0.5 vCPU / 512 MB as required. Only the edge publishes ports; Postgres, the API,
+# settlement and reporting live on a private network.
+#
+#   ./ops/deploy.sh            build, migrate, start (or redeploy) everything
+#
+# Settings and secrets come from ops/.env.prod (gitignored, created by deploy.sh).
+
+name: filspay
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: ops/Dockerfile.node
+  restart: unless-stopped
+  networks: [internal]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: filspay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ops/deploy.sh to generate secrets}
+      POSTGRES_DB: filspay
+    command:
+      - postgres
+      - -c
+      - shared_buffers=192MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - max_connections=60
+      - -c
+      - work_mem=4MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 640m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filspay -d filspay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  # Applies db/migrations before anything else starts, on every deploy. The
+  # runner skips what is already applied, so re-running is safe.
+  migrate:
+    <<: *node
+    restart: "no"
+    command: ["npm", "run", "migrate"]
+    environment:
+      DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *node
+    command: ["npx", "tsx", "apps/api/src/index.ts"]
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Keep the V8 heap below the 512 MB container limit.
+      NODE_OPTIONS: --max-old-space-size=384
+      DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
+      PG_POOL_MAX: "10"
+      SETTLEMENT_INTERNAL_URL: http://settlement:8091
+      SETTLEMENT_INTERNAL_TOKEN: ${SETTLEMENT_INTERNAL_TOKEN:?missing}
+      ACQUIRER_CALLBACK_SIGNING_SECRET: ${ACQUIRER_CALLBACK_SIGNING_SECRET:?missing}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?missing}
+      CHECKOUT_BASE_URL: ${PUBLIC_URL:?set PUBLIC_URL in ops/.env.prod}
+      CORS_ORIGINS: ${PUBLIC_URL}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # There is no email/SMS provider in this project, so with this off nobody
+      # could ever receive a login code. See docs/DEPLOY.md ("OTP").
+      OTP_DEV_EXPOSE: ${OTP_DEV_EXPOSE:-true}
+      # Only reachable through the edge proxy, so X-Forwarded-For can be trusted.
+      TRUST_PROXY: "true"
+      KYC_UPLOAD_DIR: /data/kyc
+    volumes:
+      - kyc:/data/kyc
+    cpus: 0.5
+    mem_limit: 512m
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 4s
+      retries: 6
+      start_period: 40s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Daily batch close, payouts, scheme export. It must not be killed in the
+  # middle of a close: every batch is one database transaction and re-running a
+  # day is safe, so the worst case of a stop is a rolled-back batch that the next
+  # tick closes again. The long grace period lets a running batch finish first.
+  settlement:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.go
+    restart: unless-stopped
+    command: ["./settlement", "daemon"]
+    environment:
+      DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
+      SETTLEMENT_INTERNAL_TOKEN: ${SETTLEMENT_INTERNAL_TOKEN:?missing}
+    stop_grace_period: 90s
+    mem_limit: 160m
+    networks: [internal]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  reporting:
+    <<: *node
+    command: ["npx", "tsx", "apps/reporting/src/index.ts"]
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=160
+      DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
+      PG_POOL_MAX: "3"
+    mem_limit: 192m
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # TLS, security headers, the static dashboards and the /v1 proxy.
+  edge:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.edge
+      args:
+        PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL in ops/.env.prod}
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in ops/.env.prod}
+      ADMIN_ADDRESS: ${ADMIN_ADDRESS:?set ADMIN_ADDRESS in ops/.env.prod}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 96m
+    networks: [internal]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Demo data for the checkout scenario. Not started by default:
+  #   docker compose --env-file ops/.env.prod -f ops/docker-compose.prod.yml run --rm seed
+  # It refuses to run on a database that already has merchants unless SEED_RESET=1.
+  seed:
+    <<: *node
+    restart: "no"
+    profiles: [tools]
+    command: ["npm", "run", "seed"]
+    environment:
+      DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD}@postgres:5432/filspay
+      SEED_RESET: ${SEED_RESET:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  kyc:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
