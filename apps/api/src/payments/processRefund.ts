@@ -112,12 +112,13 @@ export async function processRefund(
     // the ledger rather than recomputed from the merchant's current
     // mdr_bps, so a rate change after capture can never retroactively alter
     // what a refund reverses.
+    // Fee kept at capture = MDR credit minus the negotiated-discount debit.
     const feeResult = await client.query<{ fee_fils: string }>(
-      `SELECT COALESCE(SUM(amount_fils), 0)::text AS fee_fils
+      `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0)::text AS fee_fils
          FROM ledger_entries
         WHERE transaction_id = $1
           AND account_id = 'platform_fee_revenue'
-          AND direction = 'credit'`,
+          AND description LIKE 'capture:%'`,
       [txn.id],
     );
     const feeRow = feeResult.rows[0];
