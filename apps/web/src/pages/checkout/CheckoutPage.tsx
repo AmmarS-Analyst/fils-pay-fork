@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { formatBhd, toFils } from "@filspay/money";
 import { getPaymentLink, payPaymentLink } from "../../api/paymentLinks.js";
 import { ApiError } from "../../api/client.js";
+import { dateTime } from "../../format.js";
 import type { PaymentLinkPublicDto, PayPaymentLinkResponse, SimulatedCardInput } from "../../types.js";
 import "./CheckoutPage.css";
 
@@ -108,15 +109,23 @@ export function CheckoutPage() {
 
   if (payState.kind === "success") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page" role="status">
         <h1>Payment successful</h1>
-        <p>Thank you — your payment has been received.</p>
-        <dl>
-          <dt>Transaction ID</dt>
-          <dd>{payState.result.transactionId}</dd>
-          <dt>Paid at</dt>
-          <dd>{payState.result.paidAt}</dd>
+        <p className="checkout-amount">{formatBhd(toFils(payState.result.amountFils))} BHD</p>
+        <p>Thank you, {link.merchantDisplayName} has received your payment.</p>
+        <dl className="checkout-receipt">
+          {link.reference ? (
+            <>
+              <dt>Reference</dt>
+              <dd>{link.reference}</dd>
+            </>
+          ) : null}
+          <dt>Paid on</dt>
+          <dd>{dateTime(payState.result.paidAt)} (Bahrain time)</dd>
+          <dt>Receipt number</dt>
+          <dd className="checkout-mono">{payState.result.transactionId}</dd>
         </dl>
+        <p className="checkout-help">Keep the receipt number if you need to ask about this payment.</p>
       </main>
     );
   }

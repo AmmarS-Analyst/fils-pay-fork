@@ -85,3 +85,23 @@
   font-size: 0.75rem;
   color: #595959;
 }
+
+.checkout-receipt {
+  margin: 1rem 0;
+}
+
+.checkout-receipt dt {
+  font-size: 0.8125rem;
+  color: #595959;
+  margin-top: 0.75rem;
+}
+
+.checkout-receipt dd {
+  margin: 0.15rem 0 0;
+}
+
+.checkout-mono {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
