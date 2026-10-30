@@ -1,3 +1,4 @@
+import { reserveAccountOtpAttempt } from "../auth/otpBudget.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { verifyPassword } from "../adminAuth/passwords.js";
 import { issueAdminChallenge, verifyOtpCode } from "../adminAuth/otp.js";
@@ -125,6 +126,8 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
 
     // Reserve one attempt atomically before comparing (same race as the
     // merchant path: the row was never actually read FOR UPDATE).
+    await reserveAccountOtpAttempt(app.db, "admin", pending.adminUserId, app.config.adminOtpMaxAttempts);
+
     const challengeResult = await app.db.query<{ id: string; code_salt: string; code_hash: string }>(
       `UPDATE admin_otp_challenges SET attempt_count = attempt_count + 1
         WHERE id = $1 AND consumed_at IS NULL AND expires_at > now() AND attempt_count < max_attempts
@@ -151,6 +154,8 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const adminUser = await withTransaction(app.db, async (client) => {
+      const active = await client.query(`SELECT id FROM admin_users WHERE id = $1 AND status = 'active' FOR SHARE`, [pending.adminUserId]);
+      if (!active.rows[0]) throw new UnauthorizedError("invalid_credentials");
       const consumed = await client.query(
         `UPDATE admin_otp_challenges SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL`,
         [challenge.id],
@@ -163,6 +168,7 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
         `SELECT role FROM admin_users WHERE id = $1`,
         [pending.adminUserId],
       );
+      await client.query(`DELETE FROM account_otp_attempt_budgets WHERE account_type = 'admin' AND account_id = $1`, [pending.adminUserId]);
       return result.rows[0];
     });
     if (!adminUser) {

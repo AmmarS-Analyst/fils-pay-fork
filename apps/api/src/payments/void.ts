@@ -50,6 +50,11 @@ export async function voidTransaction(pool: Pool, input: VoidInput): Promise<Voi
       throw new NotFoundError("transaction_not_found");
     }
 
+    const unresolved = await client.query(`SELECT 1 FROM provider_operation_fences WHERE transaction_id = $1`, [txn.id]);
+    if (unresolved.rows[0]) {
+      return { statusCode: 409, body: { error: "provider_operation_unresolved" }, alreadyVoided: false };
+    }
+
     // YA: correct — second void is 200 not 409. API.md agrees
     if (txn.status === "voided") {
       // Void is idempotent by nature (no monetary side effect to risk

@@ -95,7 +95,7 @@ export async function authorizeTransaction(
       amountFils: input.amountFils,
       currency: "BHD",
       card: input.card,
-      idempotencyKey: `${claim.row.id}:${claim.row.attemptCount}`,
+      idempotencyKey: hashRequest({ merchantId: input.merchantId, endpoint: ENDPOINT, key: input.idempotencyKey, requestHash }),
     });
 
     if (acquirerResult.outcome === "approved") {

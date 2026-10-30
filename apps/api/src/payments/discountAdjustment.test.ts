@@ -7,7 +7,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
-import { applyCaptureDiscountAdjustment } from "./discountAdjustment.js";
+import { toFils } from "@filspay/money";
+import { loadConfig } from "../config.js";
+import { createAcquirerSimulator } from "../acquirer/simulator.js";
+import { recordKycReview } from "../onboarding/review.js";
+import { authorizeTransaction } from "./authorize.js";
+import { captureTransaction } from "./capture.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -35,18 +40,18 @@ async function seedCapturedTransaction(opts: {
   );
   const merchantId = merchantResult.rows[0]!.id;
 
-  const txnResult = await pool.query<{ id: string }>(
-    `INSERT INTO transactions (merchant_id, status, amount_fils, captured_fils, acquirer_reference)
-     VALUES ($1, 'captured', $2, $2, $3) RETURNING id`,
-    [merchantId, opts.capturedFils, `acq_${randomUUID()}`],
-  );
-  const transactionId = txnResult.rows[0]!.id;
-
-  await pool.query(
-    `INSERT INTO transaction_events (transaction_id, event_type, amount_fils, actor_type, metadata)
-     VALUES ($1, 'captured', $2, 'system', $3)`,
-    [transactionId, opts.capturedFils, JSON.stringify({ feeFils: opts.feeFils })],
-  );
+  await recordKycReview(pool, { merchantId, outcome: "approved", reviewerIdentifier: "test" });
+  const config = loadConfig({ DATABASE_URL: databaseUrl!, NODE_ENV: "test", ACQUIRER_FAILURE_RATE: "0", ACQUIRER_LATENCY_MIN_MS: "0", ACQUIRER_LATENCY_MAX_MS: "1" });
+  const acquirer = createAcquirerSimulator(config);
+  const authorized = await authorizeTransaction(pool, acquirer, {
+    merchantId, amountFils: toFils(opts.capturedFils),
+    card: { pan: "4242424242424242", expiryMonth: 12, expiryYear: 2030, cvv: "123" },
+    idempotencyKey: randomUUID(), actor: { type: "system" },
+  });
+  assert.equal(authorized.statusCode, 201);
+  const transactionId = (authorized.body as { id: string }).id;
+  const input = { transactionId, merchantId, idempotencyKey: `discount-${transactionId}`, actor: { type: "system" as const, id: randomUUID() } };
+  assert.equal((await captureTransaction(pool, acquirer, input)).statusCode, 200);
 
   return { merchantId, transactionId };
 }
@@ -73,7 +78,6 @@ test("posts a rebate leg pair sized by the discount applied to the fee already c
     feeFils: 17,
   });
 
-  await applyCaptureDiscountAdjustment(pool, { merchantId, transactionId });
 
   const legs = await adjustmentLegs(transactionId);
   assert.deepEqual(legs, [
@@ -90,7 +94,6 @@ test("a merchant with no negotiated discount produces no rows at all", async () 
     feeFils: 17,
   });
 
-  await applyCaptureDiscountAdjustment(pool, { merchantId, transactionId });
 
   assert.deepEqual(await adjustmentLegs(transactionId), []);
 });
@@ -105,7 +108,6 @@ test("a fee that rounds the discount down to zero posts nothing", async () => {
     feeFils: 7,
   });
 
-  await applyCaptureDiscountAdjustment(pool, { merchantId, transactionId });
 
   assert.deepEqual(await adjustmentLegs(transactionId), []);
 });
@@ -119,8 +121,11 @@ test("re-running against the same capture event does not rebate the fee twice", 
     feeFils: 17,
   });
 
-  await applyCaptureDiscountAdjustment(pool, { merchantId, transactionId });
-  await applyCaptureDiscountAdjustment(pool, { merchantId, transactionId });
 
+  const config = loadConfig({ DATABASE_URL: databaseUrl!, NODE_ENV: "test" });
+  const replay = await captureTransaction(pool, createAcquirerSimulator(config), {
+    transactionId, merchantId, idempotencyKey: `discount-${transactionId}`, actor: { type: "system", id: randomUUID() },
+  });
+  assert.equal(replay.statusCode, 200);
   assert.equal((await adjustmentLegs(transactionId)).length, 2);
 });

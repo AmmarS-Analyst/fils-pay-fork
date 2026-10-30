@@ -14,7 +14,7 @@ export async function cancelPaymentLink(
   const updateResult = await pool.query<{ id: string }>(
     `UPDATE payment_links
         SET status = 'canceled', canceled_at = now()
-      WHERE id = $1 AND merchant_id = $2 AND status = 'active'
+      WHERE id = $1 AND merchant_id = $2 AND status = 'active' AND capture_transaction_id IS NULL
       RETURNING id`,
     [input.id, input.merchantId],
   );

@@ -230,3 +230,15 @@ test("replay 404s on an archive/merchant mismatch and conflicts on a disabled ta
     (err: unknown) => err instanceof ConflictError && err.code === "endpoint_disabled",
   );
 });
+
+test("one oversized payload is refused before materializing an archive", async () => {
+  const merchantId = await createMerchant();
+  const adminUserId = await createAdminUser();
+  const endpointId = await createEndpoint(merchantId);
+  const deliveryId = await insertDelivery(endpointId, { eventType: "transaction.captured", createdAt: "2026-05-02T00:00:00Z" });
+  await pool.query(`UPDATE webhook_deliveries SET payload = jsonb_build_object('large', repeat('x', 8 * 1024 * 1024 + 1)) WHERE id = $1`, [deliveryId]);
+  await assert.rejects(createWebhookDeliveryArchive(pool, { merchantId, endpointId, adminUserId, ...WINDOW }),
+    (err: unknown) => (err as { code?: string }).code === "archive_range_too_large");
+  const archives = await pool.query(`SELECT 1 FROM webhook_delivery_archives WHERE endpoint_id = $1`, [endpointId]);
+  assert.equal(archives.rows.length, 0);
+});

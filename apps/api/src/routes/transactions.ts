@@ -1,10 +1,9 @@
+import { assertInstantRange, assertUuid, optionalInstant, optionalLimit, positiveMoney, validateCursor } from "../lib/requestValidation.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { toFils } from "@filspay/money";
 import { requireApiKey } from "../apiKeys/verify.js";
 import { requireMerchantAuth, requireMerchantRole, requireMerchantWriterActor } from "../auth/requireMerchantAuth.js";
 import { authorizeTransaction, type AuthorizeInput } from "../payments/authorize.js";
 import { captureTransaction } from "../payments/capture.js";
-import { applyCaptureDiscountAdjustment } from "../payments/discountAdjustment.js";
 import { voidTransaction } from "../payments/void.js";
 import { Readable } from "node:stream";
 import { exportTransactionsCsvChunks } from "../transactions/exportCsv.js";
@@ -77,7 +76,7 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
 
       const input: AuthorizeInput = {
         merchantId: request.apiKeyAuth!.merchantId,
-        amountFils: toFils(amountFils),
+        amountFils: positiveMoney(amountFils),
         card,
         reference,
         idempotencyKey,
@@ -94,25 +93,17 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     "/:id/capture",
     { preHandler: [requireMerchantAuth, requireMerchantRole("owner", "finance")] },
     async (request, reply) => {
+      assertUuid(request.params.id, "transaction_not_found");
       const idempotencyKey = getIdempotencyKey(request);
       const { amountFils } = request.body ?? {};
 
       const result = await captureTransaction(app.db, app.acquirer, {
         transactionId: request.params.id,
         merchantId: request.merchantAuth!.merchantId,
-        amountFils: amountFils !== undefined ? toFils(amountFils) : undefined,
+        amountFils: amountFils !== undefined ? positiveMoney(amountFils) : undefined,
         idempotencyKey,
         actor: requireMerchantWriterActor(request.merchantAuth!),
       });
-      // discount applied after capture commits, separate txn. on a replayed 200 this runs again
-      // but the count guard makes it a no-op — MK 2026-06
-      // am: and if this throws, the capture is committed but the discount never lands? retry = replay = ...
-      if (result.statusCode === 200) {
-        await applyCaptureDiscountAdjustment(app.db, {
-          merchantId: request.merchantAuth!.merchantId,
-          transactionId: request.params.id,
-        });
-      }
       reply.code(result.statusCode).send(result.body);
     },
   );
@@ -121,6 +112,7 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     "/:id/void",
     { preHandler: [requireMerchantAuth, requireMerchantRole("owner", "finance")] },
     async (request, reply) => {
+      assertUuid(request.params.id, "transaction_not_found");
       const result = await voidTransaction(app.db, {
         transactionId: request.params.id,
         merchantId: request.merchantAuth!.merchantId,
@@ -135,14 +127,18 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireMerchantAuth },
     async (request) => {
       const q = request.query;
+      const from = optionalInstant(q.from);
+      const to = optionalInstant(q.to);
+      assertInstantRange(from, to);
       const status = q.status === undefined ? undefined : Array.isArray(q.status) ? q.status : [q.status];
-      const limit = q.limit !== undefined ? Number.parseInt(q.limit, 10) : undefined;
+      const limit = optionalLimit(q.limit);
+      validateCursor(q.cursor, "instant");
 
       return listTransactions(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         status,
-        from: q.from ? new Date(q.from) : undefined,
-        to: q.to ? new Date(q.to) : undefined,
+        from,
+        to,
         search: q.search,
         limit,
         cursor: q.cursor ?? null,
@@ -155,14 +151,17 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireMerchantAuth },
     async (request, reply) => {
       const q = request.query;
+      const from = optionalInstant(q.from);
+      const to = optionalInstant(q.to);
+      assertInstantRange(from, to);
       const status = q.status === undefined ? undefined : Array.isArray(q.status) ? q.status : [q.status];
 
       // Streamed page by page: building the whole file in memory could OOM the
       // 512 MB container for a large merchant.
       const csv = Readable.from(exportTransactionsCsvChunks(app.db, {
         merchantId: request.merchantAuth!.merchantId,
-        from: q.from ? new Date(q.from) : undefined,
-        to: q.to ? new Date(q.to) : undefined,
+        from,
+        to,
         status,
       }));
 
@@ -177,6 +176,7 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     "/:id",
     { preHandler: requireMerchantAuth },
     async (request) => {
+      assertUuid(request.params.id, "transaction_not_found");
       const txn = await getTransactionById(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         transactionId: request.params.id,
@@ -194,6 +194,7 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     async (request) => {
       // Same merchant-scoped existence check as the detail route first
       // (404 if the parent transaction isn't found/owned).
+      assertUuid(request.params.id, "transaction_not_found");
       const txn = await getTransactionById(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         transactionId: request.params.id,

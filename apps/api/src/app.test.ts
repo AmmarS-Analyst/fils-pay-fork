@@ -415,3 +415,69 @@ test("API key issuance shows the raw key exactly once; a subsequent list never e
   assert.equal("rawKey" in (listBody[0] ?? {}), false);
   assert.equal("keyHash" in (listBody[0] ?? {}), false);
 });
+
+test("parallel OTP resends issue only one replacement challenge", async () => {
+  const password = "parallel-resend-password";
+  const { merchantId, email } = await signup("parallel-resend", password);
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { merchantId, email, password } });
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  await pool.query(`UPDATE otp_challenges SET created_at = now() - interval '1 minute' WHERE merchant_user_id IN (SELECT id FROM merchant_users WHERE merchant_id = $1)`, [merchantId]);
+  const results = await Promise.all(Array.from({ length: 6 }, () => app.inject({ method: "POST", url: "/v1/auth/otp/resend", headers: { cookie } })));
+  assert.equal(results.filter((r) => r.statusCode === 200).length, 1);
+  assert.equal(results.filter((r) => r.statusCode === 429).length, 5);
+});
+
+test("resend copies a concurrently reserved guess instead of a stale count", async () => {
+  const password = "resend-verify-race-password";
+  const { merchantId, email } = await signup("resend-verify-race", password);
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { merchantId, email, password } });
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  const wrongCode = login.json().devOtpCode === "000000" ? "000001" : "000000";
+  const id = await pool.query<{ id: string }>(`UPDATE otp_challenges SET created_at = now() - interval '1 minute' WHERE merchant_user_id IN (SELECT id FROM merchant_users WHERE merchant_id = $1) RETURNING id`, [merchantId]);
+  const blocker = await pool.connect();
+  await blocker.query("BEGIN");
+  await blocker.query(`SELECT id FROM otp_challenges WHERE id = $1 FOR UPDATE`, [id.rows[0]!.id]);
+  const verify = app.inject({ method: "POST", url: "/v1/auth/otp/verify", headers: { cookie }, payload: { code: wrongCode } });
+  const verifyStarted = Promise.resolve(verify);
+  let resend: Promise<{ statusCode: number }> | undefined;
+  try {
+    for (let i = 0; i < 100; i++) {
+      // pg_stat_activity snapshots are cached within this blocking transaction.
+      await blocker.query("SELECT pg_stat_clear_snapshot()");
+      const blocked = await blocker.query(`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE 'UPDATE otp_challenges SET attempt_count%'`);
+      if (blocked.rows.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (i === 99) assert.fail("verify did not reach its reservation lock");
+    }
+    resend = app.inject({ method: "POST", url: "/v1/auth/otp/resend", headers: { cookie } });
+    Promise.resolve(resend);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } finally { await blocker.query("COMMIT"); blocker.release(); }
+  assert.equal((await verifyStarted).statusCode, 401);
+  assert.equal((await resend!).statusCode, 200);
+  const current = await pool.query(`SELECT c.attempt_count FROM sessions s JOIN otp_challenges c ON c.id = s.otp_challenge_id WHERE s.merchant_user_id IN (SELECT id FROM merchant_users WHERE merchant_id = $1)`, [merchantId]);
+  assert.equal(current.rows[0].attempt_count, 1);
+});
+
+test("fresh password logins cannot reset the account-wide OTP guess limit", async () => {
+  const password = "account-otp-budget-password";
+  const { merchantId, email } = await signup("account-otp-budget", password);
+  for (let i = 0; i <= config.otpMaxAttempts; i++) {
+    const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { merchantId, email, password } });
+    const cookie = parseCookie(login.headers["set-cookie"]);
+    const code = login.json().devOtpCode === "000000" ? "000001" : "000000";
+    const result = await app.inject({ method: "POST", url: "/v1/auth/otp/verify", headers: { cookie }, payload: { code } });
+    assert.equal(result.statusCode, i < config.otpMaxAttempts ? 401 : 429);
+  }
+});
+
+test("a merchant suspended between password and OTP cannot finish login", async () => {
+  const password = "suspended-otp-password";
+  const { merchantId, email } = await signup("suspended-otp", password);
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { merchantId, email, password } });
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  await pool.query(`UPDATE merchants SET status = 'suspended' WHERE id = $1`, [merchantId]);
+  const verify = await app.inject({ method: "POST", url: "/v1/auth/otp/verify", headers: { cookie }, payload: { code: login.json().devOtpCode } });
+  assert.equal(verify.statusCode, 401);
+  assert.equal((await app.inject({ method: "GET", url: "/v1/auth/me", headers: { cookie } })).statusCode, 401);
+});

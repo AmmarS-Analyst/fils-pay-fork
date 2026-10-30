@@ -1,8 +1,8 @@
 import type { Pool } from "pg";
 import { toFils } from "@filspay/money";
 import { authorizeTransaction } from "../payments/authorize.js";
-import { captureTransaction } from "../payments/capture.js";
-import { applyCaptureDiscountAdjustment } from "../payments/discountAdjustment.js";
+import { captureTransactionInTx } from "../payments/capture.js";
+import { withTransaction } from "../db/withTransaction.js";
 import type { AcquirerSimulator, SimulatedCardInput } from "../acquirer/types.js";
 
 export interface PayPaymentLinkInput {
@@ -26,6 +26,7 @@ interface ClaimedLinkRow {
   /** reserved_at as text: microsecond precision survives, so it works as
    *  this request's ownership token for the reservation. */
   reservation: string;
+  capture_transaction_id: string | null;
 }
 
 interface LinkStatusRow {
@@ -46,13 +47,9 @@ export function expiryReferenceTime(_submittedAt?: string): Date {
  * then `captureTransaction` directly, in sequence, never issuing an HTTP
  * request back into the API's own /v1/transactions routes.
  *
- * Concurrency: reserve the link with a single
- * atomic conditional UPDATE, release the row lock immediately, run
- * authorize+capture with no lock held on payment_links at all, then
- * finalize with a second atomic conditional UPDATE keyed on still being in
- * the 'reserved' state. A short, configurable reservation timeout
- * self-heals a link stuck 'reserved' by a crash between claim and
- * finalize, with no sweep job.
+ * Concurrency: an owned authorization lease precedes a durable transaction
+ * attachment. Capture and link finalization share one row-locked transaction;
+ * retries recover that transaction rather than authorize another buyer.
  */
 export async function payPaymentLink(
   pool: Pool,
@@ -73,8 +70,10 @@ export async function payPaymentLink(
              status = 'active'
              OR (status = 'reserved' AND reserved_at < now() - ($2 || ' seconds')::interval)
             )
-        AND expires_at > $3
-      RETURNING id, merchant_id, amount_fils, reference, reserved_at::text AS reservation`,
+        AND (expires_at > $3
+          OR EXISTS (SELECT 1 FROM provider_operation_fences f WHERE f.transaction_id = payment_links.capture_transaction_id)
+          OR EXISTS (SELECT 1 FROM transactions t WHERE t.id = payment_links.capture_transaction_id AND t.captured_fils > 0))
+      RETURNING id, merchant_id, amount_fils, reference, reserved_at::text AS reservation, capture_transaction_id`,
     [input.token, config.paymentLinkReservationTimeoutSeconds, expiryCheckTime],
   );
 
@@ -89,110 +88,78 @@ export async function payPaymentLink(
     amountFils: toFils(Number(claimedRow.amount_fils)),
     reference: claimedRow.reference,
   };
-  let reservation = claimedRow.reservation;
+  const reservation = claimedRow.reservation;
 
-  // Step 2 — authorize.
-  // am: keys include link.id so two links can never collide on idempotency. good
-  const authorizeKey = `paylink:${link.id}:${input.idempotencyKey}:authorize`;
-  const authResult = await authorizeTransaction(pool, acquirer, {
-    merchantId: link.merchantId,
-    amountFils: link.amountFils,
-    card: input.card,
-    reference: link.reference ?? undefined,
-    idempotencyKey: authorizeKey,
-    // No merchant session/API key initiated this — a customer did, via
-    // the public link.
-    actor: { type: "system" },
-  });
-
-  if (authResult.statusCode !== 201) {
-    await releaseReservation(pool, link.id, reservation);
-    return {
-      statusCode: authResult.statusCode,
-      body: { stage: "authorize", ...(authResult.body as Record<string, unknown>) },
-    };
+  // A transaction attached by an earlier attempt is durable recovery state.
+  // Never authorize another card after a capture might already have succeeded.
+  let txnId = claimedRow.capture_transaction_id;
+  if (!txnId) {
+    const authResult = await authorizeTransaction(pool, acquirer, {
+      merchantId: link.merchantId,
+      amountFils: link.amountFils,
+      card: input.card,
+      reference: link.reference ?? undefined,
+      idempotencyKey: `paylink:${link.id}:${input.idempotencyKey}:authorize`,
+      actor: { type: "system" },
+    });
+    if (authResult.statusCode !== 201) {
+      await releaseReservation(pool, link.id, reservation);
+      return { statusCode: authResult.statusCode, body: { stage: "authorize", ...(authResult.body as Record<string, unknown>) } };
+    }
+    txnId = (authResult.body as { id: string }).id;
+    const attached = await pool.query(
+      `UPDATE payment_links SET capture_transaction_id = $3
+        WHERE id = $1 AND status = 'reserved' AND reserved_at = $2::timestamptz`,
+      [link.id, reservation, txnId],
+    );
+    if (attached.rowCount !== 1) {
+      return { statusCode: 409, body: { error: "payment_link_processing", stage: "capture" } };
+    }
   }
 
-  const txnId = (authResult.body as { id: string }).id;
-
-  // Step 3 — capture (full amount, immediately). amountFils omitted =>
-  // capture the full remaining amount — always correct here, since this
-  // transaction was just authorized for exactly link.amountFils and
-  // nothing else could have touched it yet.
-  // Incident 2026-05-14: renew the lease only if it is still ours. If another
-  // buyer re-claimed it while we were slow, stop before capturing.
-  const lease = await pool.query<{ reservation: string }>(
-    `UPDATE payment_links SET reserved_at = now()
-      WHERE id = $1 AND status = 'reserved' AND reserved_at = $2::timestamptz
-      RETURNING reserved_at::text AS reservation`,
-    [link.id, reservation],
-  );
-  const renewed = lease.rows[0];
-  if (!renewed) {
-    return { statusCode: 409, body: { error: "payment_link_processing", stage: "capture" } };
-  }
-  reservation = renewed.reservation;
-
-  const captureKey = `paylink:${link.id}:${input.idempotencyKey}:capture`;
-  const captureResult = await captureTransaction(pool, acquirer, {
-    transactionId: txnId,
-    merchantId: link.merchantId,
-    idempotencyKey: captureKey,
-    actor: { type: "system", id: link.id },
-  });
-
-  if (captureResult.statusCode !== 200) {
-    await releaseReservation(pool, link.id, reservation);
-    return {
-      statusCode: captureResult.statusCode,
-      body: { stage: "capture", ...(captureResult.body as Record<string, unknown>) },
-    };
-  }
-
-  // Same as the capture route: the negotiated discount is a separate posting.
-  await applyCaptureDiscountAdjustment(pool, { merchantId: link.merchantId, transactionId: txnId });
-
-  // Step 4 — finalize.
-  const finalizeResult = await pool.query<{
-    id: string;
-    paid_at: Date;
-  }>(
-    `UPDATE payment_links
-        SET status = 'paid', paid_at = now(), transaction_id = $2, reserved_at = NULL
-      WHERE id = $1 AND status = 'reserved' AND reserved_at = $3::timestamptz
-      RETURNING id, paid_at`,
-    [link.id, txnId, reservation],
-  );
-
-  const finalized = finalizeResult.rows[0];
-  // Reachable only if capture itself outlived the renewed lease and another
-  // buyer re-claimed. Money moved, so this still answers 200 and logs loudly.
-  if (!finalized) {
-    // Should be unreachable in normal operation (this request is the only
-    // holder of the reservation). The acquirer-side capture genuinely
-    // succeeded and money moved; failing to *record* that fact against the
-    // link is a data-consistency bug to surface loudly, not a reason to
-    // tell a customer whose card was actually charged that their payment
-    // failed.
-    console.error(
-      `payPaymentLink: finalize UPDATE matched 0 rows for link ${link.id} after a successful capture ` +
-        `(transaction ${txnId}) — invariant violation, investigate`,
+  return withTransaction(pool, async (client) => {
+    // Hold this row through capture and finalization using ONE connection.
+    // Even an expired lease cannot be reclaimed while money is moving.
+    const owned = await client.query(
+      `SELECT id FROM payment_links WHERE id = $1 AND status = 'reserved'
+        AND reserved_at = $2::timestamptz AND capture_transaction_id = $3 FOR UPDATE`,
+      [link.id, reservation, txnId],
+    );
+    if (!owned.rows[0]) {
+      return { statusCode: 409, body: { error: "payment_link_processing", stage: "capture" } };
+    }
+    // Legacy pre-finalization crashes may have a committed capture under
+    // the original request-derived key. Recover the actual owned transaction
+    // rather than invent another capture identity for already-moved money.
+    const captured = await client.query(
+      `SELECT 1 FROM transactions WHERE id = $1 AND merchant_id = $2 AND captured_fils = $3 FOR UPDATE`,
+      [txnId, link.merchantId, link.amountFils],
+    );
+    const captureResult = captured.rows[0] ? { statusCode: 200, body: {} } : await captureTransactionInTx(client, acquirer, {
+      transactionId: txnId,
+      merchantId: link.merchantId,
+      idempotencyKey: `paylink:${link.id}:${txnId}:capture`,
+      actor: { type: "system", id: link.id },
+    }, pool);
+    if (captureResult.statusCode !== 200) {
+      // A transport error may have an uncertain provider result: retain the
+      // attached transaction and retry the same stable provider identity.
+      await client.query(
+        `UPDATE payment_links SET status = 'active', reserved_at = NULL,
+           capture_transaction_id = CASE WHEN $2 = 402 THEN NULL ELSE capture_transaction_id END
+          WHERE id = $1`, [link.id, captureResult.statusCode],
+      );
+      return { statusCode: captureResult.statusCode, body: { stage: "capture", ...(captureResult.body as Record<string, unknown>) } };
+    }
+    const finalized = await client.query<{ paid_at: Date }>(
+      `UPDATE payment_links SET status = 'paid', paid_at = now(), reserved_at = NULL, transaction_id = $2, capture_transaction_id = NULL
+        WHERE id = $1 RETURNING paid_at`, [link.id, txnId],
     );
     return {
       statusCode: 200,
-      body: { status: "paid", transactionId: txnId, amountFils: link.amountFils, paidAt: new Date().toISOString() },
+      body: { status: "paid", transactionId: txnId, amountFils: link.amountFils, paidAt: finalized.rows[0]!.paid_at.toISOString() },
     };
-  }
-
-  return {
-    statusCode: 200,
-    body: {
-      status: "paid",
-      transactionId: txnId,
-      amountFils: link.amountFils,
-      paidAt: finalized.paid_at.toISOString(),
-    },
-  };
+  });
 }
 
 /**

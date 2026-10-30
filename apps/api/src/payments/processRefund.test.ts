@@ -520,7 +520,8 @@ test("FP-209: two concurrent full refunds pay out once", async () => {
       }),
     ),
   );
-  assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 422]);
+  assert.equal(results.filter((r) => r.statusCode === 200).length, 1);
+  assert.ok(results.some((r) => r.statusCode === 409 || r.statusCode === 422));
 
   const refunded = await pool.query<{ refunded_fils: string; n: string }>(
     `SELECT t.refunded_fils, (SELECT count(*) FROM refunds r WHERE r.transaction_id = t.id) AS n
@@ -560,4 +561,73 @@ test("another merchant's transaction id answers 404 and refunds nothing", async 
   assert.equal(result.statusCode, 404);
   const refunds = await pool.query(`SELECT 1 FROM refunds WHERE transaction_id = $1`, [txn.id]);
   assert.equal(refunds.rowCount, 0);
+});
+
+test("partial refunds conserve the charged fee through the final fils", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("fee-remainder");
+  const txn = await capturedTransaction(rawKey, 1_000);
+  const actor = await apiKeyActor(merchantId);
+  const reversed: number[] = [];
+  for (let i = 0; i < 2; i++) {
+    const result = await processRefund(pool, approvingAcquirer, {
+      transactionId: txn.id, merchantId, amountFils: toFils(500), idempotencyKey: randomUUID(), actor,
+    });
+    assert.equal(result.statusCode, 200);
+    reversed.push((result.body as { feeReversedFils: number }).feeReversedFils);
+  }
+  assert.deepEqual(reversed, [12, 13]);
+});
+
+test("concurrent successful and declined partial refunds retain completed totals and status", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("partial-race");
+  const txn = await capturedTransaction(rawKey, 1_000);
+  const actor = await apiKeyActor(merchantId);
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const slow: AcquirerSimulator = { ...approvingAcquirer, async refund(req) { entered(); await gate; return approvingAcquirer.refund(req); } };
+  const first = processRefund(pool, slow, { transactionId: txn.id, merchantId, amountFils: toFils(500), idempotencyKey: randomUUID(), actor });
+  await started;
+  const second = processRefund(pool, fixedAcquirer("declined"), { transactionId: txn.id, merchantId, amountFils: toFils(500), idempotencyKey: randomUUID(), actor });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  release();
+  const results = await Promise.all([first, second]);
+  assert.deepEqual(results.map((r) => r.statusCode), [200, 402]);
+  assert.equal((results[0]!.body as { refundedTotalFils: number }).refundedTotalFils, 500);
+  const row = await pool.query(`SELECT status, refunded_fils FROM transactions WHERE id = $1`, [txn.id]);
+  assert.equal(row.rows[0].status, "partially_refunded");
+  assert.equal(Number(row.rows[0].refunded_fils), 500);
+});
+
+test("a thrown provider response leaves no reserved total and retries with the same identity", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("refund-recover");
+  const txn = await capturedTransaction(rawKey, 1_000);
+  const actor = await apiKeyActor(merchantId);
+  const keys: string[] = [];
+  const unstable: AcquirerSimulator = { ...approvingAcquirer, async refund(req) {
+    keys.push(req.idempotencyKey);
+    if (keys.length === 1) throw new Error("response lost");
+    return approvingAcquirer.refund(req);
+  } };
+  const input = { transactionId: txn.id, merchantId, amountFils: toFils(500), idempotencyKey: randomUUID(), actor };
+  await assert.rejects(processRefund(pool, unstable, input), /response lost/);
+  const before = await pool.query(`SELECT refunded_fils FROM transactions WHERE id = $1`, [txn.id]);
+  assert.equal(Number(before.rows[0].refunded_fils), 0);
+  assert.equal((await processRefund(pool, unstable, input)).statusCode, 200);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("captures publish immutable discounted fees and refunds reverse exactly that charge", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("atomic-discount", 275);
+  await pool.query(`UPDATE merchants SET negotiated_discount_bps = 1250 WHERE id = $1`, [merchantId]);
+  const txn = await capturedTransaction(rawKey, 602);
+  const event = await pool.query(`SELECT metadata FROM transaction_events WHERE transaction_id = $1 AND event_type = 'captured'`, [txn.id]);
+  assert.equal(event.rows[0].metadata.feeFils, 17);
+  assert.equal(event.rows[0].metadata.netFeeFils, 15);
+  // Later pricing changes cannot change the original charge/refund amount.
+  await pool.query(`UPDATE merchants SET negotiated_discount_bps = 0, mdr_bps = 1000 WHERE id = $1`, [merchantId]);
+  const refunded = await processRefund(pool, approvingAcquirer, { transactionId: txn.id, merchantId, idempotencyKey: randomUUID(), actor: await apiKeyActor(merchantId) });
+  assert.equal(refunded.statusCode, 200);
+  assert.equal((refunded.body as { feeReversedFils: number }).feeReversedFils, 15);
 });

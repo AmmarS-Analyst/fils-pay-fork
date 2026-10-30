@@ -1,78 +1,90 @@
-/**
- * The injectable HTTP send — `runDispatchPass` and everything it calls take
- * a `WebhookTransport` as an explicit parameter, never calling `fetch`
- * directly deep inside dispatch logic. Same "pass the effectful dependency
- * in" shape as `AcquirerSimulator`.
- */
+import { lookup as dnsLookup } from "node:dns/promises";
+import type { LookupAddress } from "node:dns";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
+import { isInternalHost, validateWebhookUrl } from "./create.js";
 
-/**
- * @property timeoutMs Covers the whole exchange including reading the body (the abort
- * signal stays armed until the body has been read).
- */
 export interface WebhookTransportRequest {
   url: string;
   headers: Record<string, string>;
   body: string;
+  /** Bounds DNS lookup, connection, and response reading together. */
   timeoutMs: number;
 }
-
 export interface WebhookTransportResponse {
-  /** null on a transport-level failure (timeout, DNS, connection refused —
-   *  never reached the receiver) */
   statusCode: number | null;
-  /** "" on a transport-level failure */
   body: string;
-  /** present iff statusCode is null */
   errorMessage?: string;
 }
-
 export type WebhookTransport = (req: WebhookTransportRequest) => Promise<WebhookTransportResponse>;
 
-/** Real transport: Node's global fetch with an AbortController-driven
- *  timeout, used by index.ts's production wiring. */
-// Only an excerpt is stored; a huge response must not be buffered in a
-// 512 MB process (the timeout alone does not bound the size).
+interface TransportOptions {
+  /** Explicit development/test opt-in; production wiring never enables it. */
+  allowPrivateHosts?: boolean;
+  lookup?: (hostname: string) => Promise<LookupAddress[]>;
+}
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
-async function readCapped(response: Response, maxBytes: number): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (total < maxBytes) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    total += value.byteLength;
-  }
-  await reader.cancel().catch(() => {});
-  return Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
-}
-
-export function createFetchTransport(): WebhookTransport {
-  return async (req: WebhookTransportRequest): Promise<WebhookTransportResponse> => {
+/** Resolve once per delivery and pin that validated address to the socket.
+ * A separate preflight DNS check followed by fetch would allow DNS rebinding.
+ * The original hostname remains the TLS SNI/certificate name and Host header.
+ */
+export function createFetchTransport(options: TransportOptions = {}): WebhookTransport {
+  const resolve = options.lookup ?? ((hostname: string) => dnsLookup(hostname, { all: true, verbatim: true }));
+  return async (req) => {
     const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), req.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(new Error("webhook request timed out")), req.timeoutMs);
     try {
-      // Never follow redirects: a public URL could bounce us into the
-      // internal network. A 3xx is just a non-2xx delivery result.
-      const response = await fetch(req.url, {
-        method: "POST",
-        headers: req.headers,
-        body: req.body,
-        signal: controller.signal,
-        redirect: "manual",
+      const url = validateWebhookUrl(req.url, { nodeEnv: options.allowPrivateHosts ? "test" : "production" });
+      const hostname = url.hostname.replace(/^\[|\]$/g, "");
+      const addresses = isIP(hostname)
+        ? [{ address: hostname, family: isIP(hostname) }]
+        : await Promise.race([
+            resolve(hostname),
+            new Promise<never>((_resolve, reject) => {
+              controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
+            }),
+          ]);
+      if (addresses.length === 0 || addresses.some((a) => !isIP(a.address) || (!options.allowPrivateHosts && isInternalHost(a.address)))) {
+        throw new Error("webhook DNS must resolve only to public addresses");
+      }
+      const address = addresses[0]!;
+      return await new Promise<WebhookTransportResponse>((resolveResponse, reject) => {
+        const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+        const outgoing = send(url, {
+          method: "POST",
+          headers: req.headers,
+          signal: controller.signal,
+          // Connection cannot re-resolve to a private IP after validation.
+          lookup: (_hostname, lookupOptions, callback) => {
+            if (lookupOptions.all) callback(null, [address]);
+            else callback(null, address.address, address.family);
+          },
+        }, (response) => {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          const finish = () => resolveResponse({ statusCode: response.statusCode ?? 0, body: Buffer.concat(chunks, size).toString("utf8") });
+          response.on("data", (chunk: Buffer) => {
+            const remaining = MAX_RESPONSE_BYTES - size;
+            const bounded = chunk.subarray(0, remaining);
+            chunks.push(bounded);
+            size += bounded.length;
+            if (size >= MAX_RESPONSE_BYTES) {
+              finish();
+              response.destroy();
+            }
+          });
+          response.on("end", finish);
+          response.on("error", reject);
+        });
+        outgoing.on("error", reject);
+        outgoing.end(req.body);
       });
-      const body = await readCapped(response, MAX_RESPONSE_BYTES);
-      return { statusCode: response.status, body };
     } catch (err) {
-      return {
-        statusCode: null,
-        body: "",
-        errorMessage: err instanceof Error ? err.message : String(err),
-      };
+      return { statusCode: null, body: "", errorMessage: err instanceof Error ? err.message : String(err) };
     } finally {
-      clearTimeout(timeoutHandle);
+      clearTimeout(timeout);
     }
   };
 }

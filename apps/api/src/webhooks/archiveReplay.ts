@@ -17,24 +17,18 @@ export interface CreateArchiveResult {
   deliveryCount: number;
 }
 
-/**
- * Snapshots every delivery for one endpoint in [from, to) into a single
- * retained row, ahead of a URL rotation or the endpoint being disabled. No
- * row cap: an audit archive that silently dropped deliveries past some
- * threshold would defeat the reason it exists (a receiver's own support
- * team, or a future auditor, needs the *complete* record for the range they
- * were told the archive covers).
+/** An archive must fit the API memory budget; oversized ranges are rejected
+ * explicitly rather than truncated. Both checks and the read share a snapshot.
  */
-/** One archive is one in-memory array and one TEXT value. There is no paging
- *  (ADMIN.md says there is), so cap it rather than let a wide range load a
- *  year of deliveries into a 512 MB process. */
 export const MAX_ARCHIVE_DELIVERIES = 5_000;
+export const MAX_ARCHIVE_PAYLOAD_BYTES = 8 * 1024 * 1024;
 
 export async function createWebhookDeliveryArchive(
   pool: Pool,
   input: { merchantId: string; endpointId: string; adminUserId: string; from: Date; to: Date },
 ): Promise<CreateArchiveResult> {
   return withTransaction(pool, async (client) => {
+    await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
     const endpoint = await client.query<{ id: string }>(
       `SELECT id FROM webhook_endpoints WHERE id = $1 AND merchant_id = $2`,
       [input.endpointId, input.merchantId],
@@ -43,8 +37,8 @@ export async function createWebhookDeliveryArchive(
       throw new NotFoundError("webhook_endpoint_not_found");
     }
 
-    const counted = await client.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM webhook_deliveries WHERE endpoint_id = $1 AND created_at >= $2 AND created_at < $3`,
+    const counted = await client.query<{ n: string; bytes: string }>(
+      `SELECT count(*)::text AS n, COALESCE(sum(octet_length(payload::text)), 0)::text AS bytes FROM webhook_deliveries WHERE endpoint_id = $1 AND created_at >= $2 AND created_at < $3`,
       [input.endpointId, input.from, input.to],
     );
     if (Number(counted.rows[0]?.n ?? 0) > MAX_ARCHIVE_DELIVERIES) {
@@ -52,6 +46,10 @@ export async function createWebhookDeliveryArchive(
         "archive_range_too_large",
         `more than ${MAX_ARCHIVE_DELIVERIES} deliveries in range; archive a shorter period`,
       );
+    }
+
+    if (Number(counted.rows[0]?.bytes ?? 0) > MAX_ARCHIVE_PAYLOAD_BYTES) {
+      throw new UnprocessableEntityError("archive_range_too_large", "archive payload exceeds 8 MiB; archive a shorter period");
     }
 
     const rows = await client.query<{

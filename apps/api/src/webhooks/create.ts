@@ -8,7 +8,7 @@ import { decodeEncryptionKey, encryptSecret } from "./secretCrypto.js";
 /** Hosts a merchant must not point the dispatcher at: loopback, private ranges,
  *  link-local (cloud metadata) and internal names. https alone didn't stop
  *  https://10.0.0.5/. */
-function isInternalHost(hostname: string): boolean {
+export function isInternalHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) {
     return true;
@@ -16,7 +16,7 @@ function isInternalHost(hostname: string): boolean {
   if (isIP(host) === 4) {
     const [a, b] = host.split(".").map(Number) as [number, number];
     return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+      (a === 192 && (b === 168 || b === 0)) || (a === 100 && b >= 64 && b <= 127) || a >= 224 || (a === 198 && (b === 18 || b === 19));
   }
   if (isIP(host) === 6) {
     return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith("::ffff:");

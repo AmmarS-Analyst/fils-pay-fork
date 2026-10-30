@@ -78,3 +78,59 @@ test("a pay attempt whose reservation was re-claimed during authorize does not c
   const row = await pool.query<{ status: string }>(`SELECT status FROM payment_links WHERE id = $1`, [link.id]);
   assert.equal(row.rows[0]!.status, "reserved", "the other buyer's reservation is left intact");
 });
+
+test("a lease expiring during capture cannot let a second buyer capture", async () => {
+  const link = await activeLink();
+  const real = createAcquirerSimulator(config);
+  let captures = 0;
+  let started!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const acquirer: AcquirerSimulator = {
+    ...real,
+    async capture(req) {
+      captures++;
+      if (captures === 1) { started(); await gate; }
+      return real.capture(req);
+    },
+  };
+  const raceConfig = { paymentLinkReservationTimeoutSeconds: 0 };
+  const first = payPaymentLink(pool, acquirer, raceConfig, { token: link.token, card: CARD, idempotencyKey: randomUUID() });
+  await entered;
+  const second = payPaymentLink(pool, acquirer, raceConfig, { token: link.token, card: CARD, idempotencyKey: randomUUID() });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(captures, 1, "the link lock must protect the whole acquirer call");
+  } finally { release(); }
+  const results = await Promise.all([first, second]);
+  assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 409]);
+  assert.equal(captures, 1);
+});
+
+test("interrupted capture recovers the attached transaction and provider identity", async () => {
+  const link = await activeLink();
+  const real = createAcquirerSimulator(config);
+  let authorizations = 0;
+  const providerKeys: string[] = [];
+  const acquirer: AcquirerSimulator = {
+    async authorize(req) { authorizations++; return real.authorize(req); },
+    async capture(req) {
+      providerKeys.push(req.idempotencyKey);
+      const result = await real.capture(req);
+      if (providerKeys.length === 1) throw new Error("lost response after provider capture");
+      return result;
+    },
+    refund: (req) => real.refund(req),
+  };
+  const raceConfig = { paymentLinkReservationTimeoutSeconds: 0 };
+  await assert.rejects(payPaymentLink(pool, acquirer, raceConfig, { token: link.token, card: CARD, idempotencyKey: randomUUID() }), /lost response/);
+  const recovered = await payPaymentLink(pool, acquirer, raceConfig, { token: link.token, card: CARD, idempotencyKey: randomUUID() });
+  assert.equal(recovered.statusCode, 200, JSON.stringify(recovered.body));
+  assert.equal(authorizations, 1, "recovery must not authorize another card");
+  assert.equal(providerKeys.length, 2);
+  assert.equal(providerKeys[0], providerKeys[1], "the provider deduplicates the repeated capture");
+  const stored = await pool.query(`SELECT transaction_id, capture_transaction_id FROM payment_links WHERE id = $1`, [link.id]);
+  assert.ok(stored.rows[0].transaction_id);
+  assert.equal(stored.rows[0].capture_transaction_id, null);
+});
