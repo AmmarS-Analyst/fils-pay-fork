@@ -2,9 +2,8 @@ import type { Pool } from "pg";
 import { formatBhd, toFils } from "@filspay/money";
 
 /**
- * Report predicate. `merchantId` is always overwritten by the route with the
- * authenticated merchant before this reaches runTransactionsReport, so a
- * value supplied in the saved filter body is ignored.
+ * Report predicate. `merchantId` has already been resolved by
+ * reporting/scope.ts: the caller, or one of the caller's own split children.
  */
 export interface TransactionReportFilter {
   merchantId: string;
