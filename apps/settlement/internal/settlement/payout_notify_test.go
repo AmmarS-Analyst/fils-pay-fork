@@ -122,3 +122,30 @@ func TestEnqueuePayoutNotificationsSkipsIneligibleBatches(t *testing.T) {
 		t.Fatalf("a batch that has not reached 'paid' must not be notified, got %d event(s)", got)
 	}
 }
+
+// Incident 2026-08-21: the daemon and the run-batch CLI scanning at the same
+// time must still enqueue one settlement.paid per batch.
+func TestEnqueuePayoutNotificationsConcurrentScansEnqueueOnce(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+
+	merchantID := insertActiveMerchant(t, pool, 250)
+	paidBatch := insertBatch(t, pool, merchantID, time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC), "paid", 9_000)
+
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			_, err := EnqueuePayoutNotifications(ctx, pool)
+			errs <- err
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("EnqueuePayoutNotifications: %v", err)
+		}
+	}
+
+	if got := countPaidEvents(t, pool, paidBatch); got != 1 {
+		t.Fatalf("concurrent scans enqueued %d settlement.paid events, want 1", got)
+	}
+}
