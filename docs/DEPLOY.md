@@ -87,3 +87,31 @@ The project has no email or SMS provider. With `NODE_ENV=production` the login c
 - All services use one database role. A least-privilege role per service (as the compose file's old TODO says) is not done.
 - No rate limiting or load shedding yet at the edge or in the API (see the capacity section of the roadmap).
 - This stack has been **validated** (`docker compose config`, front ends built for same-origin) but not yet **started** on a real server by me; the first deploy is the first full test. Plain-HTTP smoke test: set `SITE_ADDRESS=:80`, `ADMIN_ADDRESS=:8443`, `PUBLIC_URL=http://<server-ip>`, `COOKIE_SECURE=false`.
+
+## Live instance (Fri 2026-10-30)
+
+| | |
+|---|---|
+| Merchant dashboard + checkout | http://139.59.62.5 (`/dashboard/login`, `/pay/<token>`) |
+| Admin | http://139.59.62.5:8443 |
+| API | http://139.59.62.5/v1 · health `/healthz`, `/readyz` |
+| Server | DigitalOcean droplet, Ubuntu 24.04, 1 vCPU / 2 GB + 2 GB swap, Docker 29 + Compose 2.40 from Ubuntu packages |
+| Code | `~/sites/fils-pay` (clone of the public fork), env in `ops/.env.prod` (mode 600, secrets generated on the box) |
+
+No domain was provided, so it runs on plain HTTP (`SITE_ADDRESS=:80`,
+`COOKIE_SECURE=false`). With a domain, set `SITE_ADDRESS`/`ADMIN_ADDRESS`/`PUBLIC_URL`
+and `COOKIE_SECURE=true` and rerun `ops/deploy.sh`; Caddy then gets a certificate.
+
+Checked from outside after deploy: health/readiness, security headers, admin
+port, OTP login, and through the API a capture → full refund (`refunded`) and a
+capture → partial refund 5.000 of 20.000 (`partially_refunded`), with a further
+20.000 refund rejected (`422 refund_exceeds_refundable`, 15.000 left). Two bugs
+were found while doing this (BUGS #63, #64) and fixed before going live.
+
+Notes:
+* Docker publishes ports through its own iptables rules, so 8443 is reachable
+  although ufw lists only 22/80/443.
+* The organisers' log agent ships journald and syslog; container logs stay in
+  Docker's json files (`./ops/deploy.sh logs <service>`).
+* `seed` prints API keys twice: its self-check re-runs the generator. The keys
+  that work are the **second** set printed.
