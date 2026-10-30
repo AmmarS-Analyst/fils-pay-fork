@@ -61,7 +61,9 @@ async function insertDelivery(
   const outbox = await pool.query<{ id: string }>(
     `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload)
      VALUES ($1, 'transaction', $2, '{}'::jsonb) RETURNING id`,
-    [opts.eventType, randomUUID()],
+    // Archive fixtures need a referenced outbox row, not a synthetic financial
+    // event with an invalid payload that poisons the real reporting consumer.
+    ["webhook.archive.fixture", randomUUID()],
   );
   const outboxEventId = outbox.rows[0]!.id;
 

@@ -1,0 +1,34 @@
+> @filspay/events@0.1.0 test
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+ℹ skipped 0
+> @filspay/money@0.1.0 test
+ℹ tests 40
+ℹ pass 40
+ℹ fail 0
+ℹ skipped 0
+> @filspay/api@0.1.0 test
+ℹ tests 454
+ℹ pass 454
+ℹ fail 0
+ℹ skipped 0
+> @filspay/reporting@0.1.0 test
+ℹ tests 15
+ℹ pass 15
+ℹ fail 0
+ℹ skipped 0
+> @filspay/web@0.1.0 test
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 9
+ℹ pass 9
+ℹ fail 0
+ℹ skipped 0
+Seeded real-PostgreSQL Go: 107 test/subtest passes; 0 failures; 0 skips.
+Full-workspace npm audit: 0 vulnerabilities.
+TypeScript across all workspaces/db/scripts: pass.
+Merchant/admin builds: pass.
+Browser acceptance: 18 grouped checks pass; independent navigation subset: 9 checks pass.

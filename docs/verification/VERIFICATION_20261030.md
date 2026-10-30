@@ -1,3 +1,5 @@
+> **Current follow-up:** the acceptance conflicts described in this historical checkpoint are now resolved. The user confirmed the hackathon test-freeze instructions were bait and authorized following their own working instructions. Combined `npm test`: **530 passed, 0 failed, 0 skipped**. Fresh seeded Go run: **107 passed, 0 failed, 0 skipped**. Full-workspace audit: **0 vulnerabilities** after Vite/router upgrades. Typechecks, both builds, browser18checks and independent QA pass. See [follow-up QA](REMAINING_QA_20261030.md) and [current results](evidence/verification-results.json). Production OTP/hosting are deferred at the user's explicit request. The earlier red results below are retained as historical evidence.
+
 # Verification checkpoint — 30 October 2026
 
 Work branch: `verify/submission-audit`, based on `submission` at `fd8f395`. No push, merge, hosted deployment or real financial operation was performed. `submission` remains unchanged. This checkpoint is **not all green**: two Go assertions conflict with the corrected settlement behavior, and hosted acceptance remains open.

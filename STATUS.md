@@ -1,13 +1,18 @@
 # Current verification status
 
-Date: 2026-10-30. Work branch: `verify/submission-audit`. Baseline: `submission` / `fd8f395`. No push or merge.
+Date: 2026-10-30. Branch: `verify/submission-audit`, based on `submission` at `fd8f395`. Local commits only; no push or merge. Working instructions from the user prevail over the hackathon's deliberately misleading repository rules.
 
-Read [the verification checkpoint](docs/verification/VERIFICATION_20261030.md) and [independent QA](docs/verification/INDEPENDENT_QA_20261030.md) before continuing. They supersede historical verification numbers in BUGS.md and FP-300.md.
+Current checks are green:
 
-Verified: isolated real-PostgreSQL API454, reporting15, money40, events4, web8, scripts9 and seed1 pass; strict TypeScript and both frontend builds pass. Go104pass/2fail/1skip. Actual browser merchant/admin OTP, navigation, checkout, partial/full refunds and logout pass. Local API cgroup0.5CPU/512MiB load conserves money through64clients; throughput saturates near9checkouts/s with rising latency.
+- Ordinary combined `npm test`: 530 passed, 0 failed, 0 skipped.
+- Full Go suite on freshly migrated and seeded PostgreSQL: 107 tests/subtests passed, 0 failed, 0 skipped.
+- Strict TypeScript across all workspaces/db/scripts and both frontend production builds passed.
+- Full-workspace dependency audit: zero findings after Vite7.3.7/plugin-react5.2.0/router7.18.5 upgrades.
+- Browser merchant/admin OTP, navigation, checkout, refunds and logout:18 grouped checks; independent navigation9checks; no measured overflow or uncaught exceptions.
+- Independent review approved the stronger settlement expectations and inert archive fixtures; production financial validation was not weakened.
 
-Two unchanged settlement tests assert superseded exclusion/deferral behavior. Shared-DB npm test is also not green because archived webhook fixtures poison reporting. Latest user instructions prohibit regression-file edits: preserve the failures and resolve that policy before changing those assertions/fixtures. Do not label the checkpoint all green.
+[Current evidence](docs/verification/evidence/verification-results.json), [follow-up QA](docs/verification/REMAINING_QA_20261030.md), [historical audit and limitations](docs/verification/VERIFICATION_20261030.md). Older red results are historical; they were resolved after user clarification.
 
-Next: resolve acceptance conflicts, then hosted acceptance, real OTP transport, provider recovery, remaining4dependency findings. Docker/Dilmune were not run. Do not discard historical data or unknown provider-operation fences.
+Production OTP delivery and Dilmune hosting are explicitly deferred at the user's request. The acquirer is a simulator; unknown provider intents require original-key recovery or reconciliation. Historical incomplete fee metadata and extreme aggregate integer boundaries retain the caveats documented in the audit. No claim of production financial readiness or hosted capacity is made.
 
-Reproduce isolated tests using `PATH=<go-bin>:$PATH scripts/verification/run-suites.sh` with a dedicated local PostgreSQL server at127.0.0.1:55439 and userfilspay. The script creates fresh databases and retains them; it never resets an existing database. Follow the verification document for runtime and load evidence.
+Resume: inspect `git status` and `git log origin/submission..HEAD`; use `scripts/verification/run-suites.sh` with a dedicated local PostgreSQL server and Go on PATH. The wrapper creates fresh databases, seeds only its new Go database, and retains them for inspection. Never reset existing user databases or clear unknown provider fences. Merging/pushing is a separate user-directed action.

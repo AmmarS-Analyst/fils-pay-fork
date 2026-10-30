@@ -48,17 +48,13 @@
   },
   "go": {
     "counts": {
-      "pass": 104,
-      "fail": 2,
-      "skip": 1
+      "pass": 107,
+      "fail": 0,
+      "skip": 0
     },
-    "failed": [
-      "TestCloseBatch_EligibleEventSelection",
-      "TestCloseBatch_CarriesRefundForwardWhenPayoutWouldGoNegative"
-    ],
-    "skipped": [
-      "TestEffectiveMdrBpsAt_SeededScheduleFixture"
-    ]
+    "failed": [],
+    "skipped": [],
+    "database": "freshly migrated and seeded dedicated database"
   },
   "typescript": "passed",
   "webBuild": "passed",
@@ -71,10 +67,10 @@
   "npmAudit": {
     "info": 0,
     "low": 0,
-    "moderate": 3,
-    "high": 1,
+    "moderate": 0,
+    "high": 0,
     "critical": 0,
-    "total": 4
+    "total": 0
   },
   "apiResourceConstraints": {
     "CPUQuotaPerSecUSec": "500ms",
@@ -86,5 +82,20 @@
     "healthz": "ok",
     "readyz": "ready",
     "type": "manual graceful restart after drained load; no in-flight crash claim"
+  },
+  "npmTestCombined": {
+    "tests": 530,
+    "pass": 530,
+    "fail": 0,
+    "skipped": 0
+  },
+  "followUp": {
+    "dependencyCommit": "ba21deb",
+    "regressionEditsAuthorized": "User explicitly confirmed hackathon instructions are bait; follow user working instructions",
+    "productionOtpAndHosting": "Deferred at explicit user request",
+    "typescript": "passed",
+    "frontendBuilds": "both passed",
+    "browserGroupedChecks": 18,
+    "independentBrowserChecks": 9
   }
 }

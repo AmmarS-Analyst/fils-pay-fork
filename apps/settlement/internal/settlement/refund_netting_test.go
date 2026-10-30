@@ -107,8 +107,11 @@ func TestCloseBatch_CarriesRefundForwardWhenPayoutWouldGoNegative(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CloseBatch day2: %v", err)
 	}
-	if b2.NetPayoutFils != 0 || b2.EventCount != 0 {
-		t.Fatalf("day2 = (net %d, events %d), want (0, 0): the refund waits", b2.NetPayoutFils, b2.EventCount)
+	if b2.NetPayoutFils != 0 || b2.EventCount != 1 || b2.CarryOutFils != -1950 {
+		t.Fatalf("day2 = %+v: claim refund once and carry its 1950-fil net debt", b2)
+	}
+	if countRows(t, pool, `SELECT count(*) FROM transaction_events WHERE transaction_id=$1 AND event_type IN ('refunded','refund_partial') AND settlement_batch_id=$2`, txnID, b2.BatchID) != 1 {
+		t.Fatal("refund must have one durable batch claim")
 	}
 
 	_, fee3 := insertCaptureEvent(t, pool, merchantID, mdrBps, 5_000, start3.Add(time.Hour))
@@ -117,8 +120,8 @@ func TestCloseBatch_CarriesRefundForwardWhenPayoutWouldGoNegative(t *testing.T) 
 		t.Fatalf("CloseBatch day3: %v", err)
 	}
 	want := money.Fils(5_000) - fee3 - (2_000 - 50)
-	if b3.NetPayoutFils != want {
-		t.Fatalf("day3 net = %d, want %d (the carried refund is netted here)", b3.NetPayoutFils, want)
+	if b3.NetPayoutFils != want || b3.CarryInFils != -1950 || b3.CarryOutFils != 0 || b3.EventCount != 1 {
+		t.Fatalf("day3 = %+v, want net %d: carry is recovered without claiming refund again", b3, want)
 	}
 	if _, err := PayoutBatch(context.Background(), pool, b3.BatchID); err != nil {
 		t.Fatalf("PayoutBatch day3: %v", err)

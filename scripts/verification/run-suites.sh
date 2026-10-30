@@ -31,7 +31,7 @@ run_suite web npm run test --workspace @filspay/web
 run_suite scripts node --import tsx --test --test-concurrency=1 scripts/expire_holds.test.ts scripts/reconcile_march.test.ts scripts/reconcile_march.integration.test.ts scripts/seed_guard.test.ts
 run_suite seed node --import tsx --test db/seed/selfVerify.integration.test.ts
 if command -v go >/dev/null; then
-  run_suite go bash -c 'cd apps/settlement && go test -count=1 -p 1 ./...'
+  run_suite go bash -c 'npm run seed && cd apps/settlement && go test -count=1 -p 1 ./...'
 else
   echo 'FAIL go: toolchain not on PATH'
   result=1

@@ -173,24 +173,30 @@ func TestCloseBatch_EligibleEventSelection(t *testing.T) {
 
 	// One eligible event inside the window...
 	_, feeInside := insertCaptureEvent(t, pool, merchantID, mdrBps, 4750, insideWindow)
-	// ...and two events that must NOT be picked up: one on the previous
-	// business day, one on the next.
-	insertCaptureEvent(t, pool, merchantID, mdrBps, 9999, beforeWindow)
-	insertCaptureEvent(t, pool, merchantID, mdrBps, 8888, afterWindow)
+	// An older unbatched capture must be settled once rather than stranded.
+	priorID, feePrior := insertCaptureEvent(t, pool, merchantID, mdrBps, 9999, beforeWindow)
+	// Future activity still belongs to a later batch.
+	futureID, _ := insertCaptureEvent(t, pool, merchantID, mdrBps, 8888, afterWindow)
 
 	result, err := CloseBatch(context.Background(), pool, merchantID, businessDate)
 	if err != nil {
 		t.Fatalf("CloseBatch: %v", err)
 	}
 
-	if result.GrossFils != 4750 {
-		t.Errorf("GrossFils = %d, want 4750 (out-of-window events must be excluded)", result.GrossFils)
+	if result.GrossFils != 14749 {
+		t.Errorf("GrossFils = %d, want 14749 (current plus older unbatched captures)", result.GrossFils)
 	}
-	if result.FeeFils != feeInside {
-		t.Errorf("FeeFils = %d, want %d", result.FeeFils, feeInside)
+	if result.FeeFils != feeInside+feePrior {
+		t.Errorf("FeeFils = %d, want %d", result.FeeFils, feeInside+feePrior)
 	}
-	if result.EventCount != 1 {
-		t.Errorf("EventCount = %d, want 1", result.EventCount)
+	if result.EventCount != 2 {
+		t.Errorf("EventCount = %d, want 2", result.EventCount)
+	}
+	if countRows(t, pool, `SELECT count(*) FROM transaction_events WHERE transaction_id=$1 AND settlement_batch_id=$2`, priorID, result.BatchID) != 1 {
+		t.Error("older capture was not assigned to this batch")
+	}
+	if countRows(t, pool, `SELECT count(*) FROM transaction_events WHERE transaction_id=$1 AND settlement_batch_id IS NULL`, futureID) != 1 {
+		t.Error("future capture must remain unbatched")
 	}
 }
 

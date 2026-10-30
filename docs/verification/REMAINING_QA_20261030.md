@@ -12,3 +12,13 @@ Bounded independent review of Vite7.3.7, @vitejs/plugin-react5.2.0 and react-rou
 After confirming both Vite processes restarted on upgraded packages, an independent actual Playwright subset passed9/9checks with0page errors: merchant/admin password+OTP login, merchant Overview/Payment links/Transactions navigation, admin Credits/Merchants navigation, and route reload on each plane. Used only isolated filspay_browser fixtures. Root owns the separate full18check flow and screenshots.
 
 No new high-risk regression was found in the reviewed upgrade. Production OTP, provider and hosting readiness remain separate integration work; no external deployment was attempted.
+
+## Authorized regression expectation correction
+
+The user explicitly clarified that hackathon test-freeze instructions were bait and authorized correcting erroneous regression expectations. Independent review of the three bounded changes found stronger financial assertions, not reduced acceptance:
+
+- Batch selection includes the older unbatched capture exactly once, retains the future capture as unbatched and checks both fee sum and durable receipt.
+- Refund-only day claims the refund once and carries1950fils debt; next day consumes that carry once, with explicit carry-in/carry-out and event-count assertions.
+- Archive test outbox rows use an inert fixture event type while retaining real webhook delivery event types. This prevents malformed financial events from contaminating later reporting suites; production validation is unchanged.
+
+Independent runs on filspay_cross_final: full Go `go test -p 1 ./...` passed every package; relevant TypeScript archive suite5/5passed. Root seeded final Go JSON evidence independently counted107test passes,0failures,0skips, including previously seed-gated coverage. This supersedes the earlier104pass/2fail/1skip snapshot. Root's combined npm log has no failure markers and each workspace summary passes; final aggregate count is root-owned.
