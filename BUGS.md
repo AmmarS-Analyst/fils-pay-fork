@@ -77,6 +77,7 @@ Severity: **Critical** = money lost or stolen, or a security bypass · **High** 
 | 62 | — | Capture ignores the authorization hold, so expired authorizations can be captured | High |
 | 63 | — | The built-in development webhook key is 34 bytes, so any non-production run without the variable crashes on boot | Medium |
 | 64 | — | A malformed JSON body returns 500 internal_error instead of 400 | Low |
+| 65 | — | Over plain HTTP the checkout Pay button and the transaction page crash (`crypto.randomUUID` missing) | Critical |
 
 ## How this was verified (and what was not)
 
@@ -578,6 +579,15 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 - **Impact:** A client typo looks like a server outage (wrong status, misleading alerts, error-rate dashboards inflated by caller mistakes).
 - **Fix:** Any Fastify error that already carries a 4xx status answers `400 invalid_request` with its message; real faults still answer a bare 500.
 - **Tests:** `{bad` with `content-type: application/json` → 400 (before: 500); a thrown error → still 500 with no details.
+
+---
+
+## 65. Over plain HTTP, paying and opening a transaction crash
+**Where:** `apps/web/src/pages/checkout/CheckoutPage.tsx`, `transactions/RefundDrawer.tsx`, `transactions/TransactionDetailPage.tsx`
+- **What / Why:** The pages make their Idempotency-Key with `crypto.randomUUID()`. Browsers only provide that function in a secure context (HTTPS or localhost). Found on the live server (plain HTTP, no domain): opening any transaction showed "Unexpected Application Error: crypto.randomUUID is not a function".
+- **Impact:** On any non-HTTPS deployment the hosted checkout cannot take a payment (the Pay handler throws) and merchants cannot open a transaction, capture or refund from the dashboard. Local development on localhost hides it.
+- **Fix:** One helper, `newIdempotencyKey()`, that uses `randomUUID` when present and otherwise builds a v4 UUID from `crypto.getRandomValues` (available everywhere).
+- **Tests:** With `randomUUID` removed, the helper still returns distinct valid v4 UUIDs; verified on the live site that the transaction page opens again.
 
 ---
 

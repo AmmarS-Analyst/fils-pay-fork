@@ -6,6 +6,7 @@ import { ApiError } from "../../api/client.js";
 import { dateTime } from "../../format.js";
 import type { PaymentLinkPublicDto, PayPaymentLinkResponse, SimulatedCardInput } from "../../types.js";
 import "./CheckoutPage.css";
+import { newIdempotencyKey } from "../../idempotencyKey.js";
 
 type LoadState =
   | { kind: "loading" }
@@ -56,7 +57,7 @@ export function CheckoutPage() {
 
     // A fresh Idempotency-Key per explicit user action — every click,
     // including a "try again" after a decline, is a new attempt.
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = newIdempotencyKey();
     const submittedAt = new Date().toISOString();
     setPayState({ kind: "submitting" });
 

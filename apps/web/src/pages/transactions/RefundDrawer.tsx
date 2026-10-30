@@ -5,6 +5,7 @@ import { useDashboardAuth } from "../../auth/DashboardAuthContext.js";
 import { RequireRole } from "../../auth/RequireRole.js";
 import { bhd } from "../../format.js";
 import type { TransactionDto } from "../../types.js";
+import { newIdempotencyKey } from "../../idempotencyKey.js";
 
 interface RefundResponse {
   id: string;
@@ -31,7 +32,7 @@ export function RefundDrawer({ txn, onRefunded }: RefundDrawerProps) {
   const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [attemptKey, setAttemptKey] = useState(() => crypto.randomUUID());
+  const [attemptKey, setAttemptKey] = useState(() => newIdempotencyKey());
 
   const merchantId = me?.merchant.id;
   const refundableFils = txn.capturedFils - txn.refundedFils;
@@ -40,7 +41,7 @@ export function RefundDrawer({ txn, onRefunded }: RefundDrawerProps) {
   function changeAmount(value: string): void {
     setAmount(value);
     // A different amount is a different request: it needs its own key.
-    setAttemptKey(crypto.randomUUID());
+    setAttemptKey(newIdempotencyKey());
   }
 
   async function handleRefund(event: React.FormEvent): Promise<void> {
@@ -80,7 +81,7 @@ export function RefundDrawer({ txn, onRefunded }: RefundDrawerProps) {
 
       setOpen(false);
       setAmount("");
-      setAttemptKey(crypto.randomUUID());
+      setAttemptKey(newIdempotencyKey());
       // Refetch: the refund wrote a new transaction_events row server-side.
       await onRefunded();
     } catch (err) {
