@@ -385,7 +385,7 @@ test("GET /v1/settlement/reconciliation reports gapFils === 0 for a fully-batche
   assert.equal(report.ledgerMerchantPayableNetFils, expectedNet);
 });
 
-// merchant in this fixture has no discount and no schedule row, so the float path is exact here — MK
+
 test("GET /v1/settlement/reconciliation with an unbatched capture reports it as pendingUnbatchedFils, not an unexplained gap", async () => {
   const { rawKey } = await createApprovedMerchantWithApiKey("reconciliation-pending", 250);
   const txn = await authorize(rawKey, 2_000);
@@ -505,4 +505,25 @@ test("GET /v1/settlement/reconciliation succeeds for a 'finance' session role", 
     headers: cookieHeader(financeToken),
   });
   assert.equal(res.statusCode, 200, res.body);
+});
+
+test("reconciliation pending uses the fee capture actually charged (fee schedule rate, not merchants.mdr_bps)", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("reconciliation-schedule", 250);
+  await pool.query(
+    `INSERT INTO fee_schedules (merchant_id, mdr_bps, effective_from) VALUES ($1, 400, now() - interval '1 day')`,
+    [merchantId],
+  );
+  const txn = await authorize(rawKey, 10_000);
+  await capture(rawKey, txn.id);
+
+  const businessDate = todayBahrainDateString();
+  const res = await app.inject({
+    method: "GET",
+    url: `/v1/settlement/reconciliation?from=${businessDate}&to=${addOneCalendarDay(businessDate)}`,
+    headers: authHeader(rawKey),
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const report = res.json() as { gapFils: number; pendingUnbatchedFils: number };
+  assert.equal(report.pendingUnbatchedFils, 10_000 - 400, "4% schedule rate, not the 2.5% on the merchant row");
+  assert.equal(report.gapFils, 0);
 });

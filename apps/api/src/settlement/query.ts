@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { estimateFeeFils } from "../fees/estimate.js";
+import { applyRateFils, toFils } from "@filspay/money";
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
@@ -301,10 +301,11 @@ export async function getReconciliationReport(
           AND status IN ('closed', 'paid')`,
       [input.merchantId, input.from, input.to],
     ),
-    pool.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number }>(
+    pool.query<{ amount_fils: string | number; is_refund: boolean; fee_reversed_fils: string | number; fee_fils: string | number }>(
       `SELECT te.amount_fils,
               te.event_type IN ('refunded', 'refund_partial') AS is_refund,
-              COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils
+              COALESCE((te.metadata->>'feeReversedFils')::bigint, 0) AS fee_reversed_fils,
+              COALESCE((te.metadata->>'feeFils')::bigint, 0) AS fee_fils
          FROM transaction_events te
          JOIN transactions t ON t.id = te.transaction_id
         WHERE t.merchant_id = $1
@@ -313,17 +314,13 @@ export async function getReconciliationReport(
           AND te.occurred_at >= $2 AND te.occurred_at < $3`,
       [input.merchantId, windowStart, windowEnd],
     ),
-    pool.query<{ mdr_bps: number; negotiated_discount_bps: number }>(
-      `SELECT mdr_bps, negotiated_discount_bps FROM merchants WHERE id = $1`,
+    pool.query<{ negotiated_discount_bps: number }>(
+      `SELECT negotiated_discount_bps FROM merchants WHERE id = $1`,
       [input.merchantId],
     ),
   ]);
 
-  // MK: merchants.mdr_bps is kept in sync with the current fee_schedules row by the 0046 trigger,
-  // so reading it here is the same as resolving the schedule
-  const merchant = merchantResult.rows[0];
-  const mdrBps = merchant?.mdr_bps ?? 0;
-  const discountBps = merchant?.negotiated_discount_bps ?? 0;
+  const discountBps = merchantResult.rows[0]?.negotiated_discount_bps ?? 0;
 
   let pendingUnbatchedFils = 0;
   for (const row of pendingResult.rows) {
@@ -333,8 +330,12 @@ export async function getReconciliationReport(
       pendingUnbatchedFils += amountFils + Number(row.fee_reversed_fils);
       continue;
     }
-    const feeFils = estimateFeeFils(amountFils, mdrBps, discountBps);
-    pendingUnbatchedFils += amountFils - feeFils;
+    // Use the fee capture actually charged (fee schedule and volume tier
+    // included) less the discount posting, i.e. exactly what the ledger holds.
+    // mdr_bps is not kept in sync with fee_schedules (there is no trigger).
+    const chargedFee = toFils(Number(row.fee_fils));
+    const netFee = chargedFee - applyRateFils(chargedFee, discountBps);
+    pendingUnbatchedFils += amountFils - netFee;
   }
 
   const ledgerMerchantPayableNetFils = Number(ledgerResult.rows[0]?.net ?? 0);
