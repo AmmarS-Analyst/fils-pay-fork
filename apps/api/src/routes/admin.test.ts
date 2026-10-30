@@ -502,6 +502,17 @@ test("bulk approve KYC flips every selected pending merchant and writes one audi
     assert.equal(row.onboarding_status, "approved");
   }
 
+  // Each approval also leaves its own review record, like a single review.
+  const reviews = await pool.query<{ merchant_id: string; outcome: string; reviewer_admin_user_id: string }>(
+    `SELECT merchant_id, outcome, reviewer_admin_user_id FROM merchant_kyc_reviews WHERE merchant_id = ANY($1)`,
+    [[first.merchantId, second.merchantId]],
+  );
+  assert.equal(reviews.rowCount, 2);
+  for (const r of reviews.rows) {
+    assert.equal(r.outcome, "approved");
+    assert.equal(r.reviewer_admin_user_id, finance.id);
+  }
+
   const audit = await auditRowsFor(finance.id, "kyc_bulk_approve");
   assert.equal(audit.length, 1, "one audit row for the whole batch, not one per merchant");
   assert.equal(audit[0]!.target_type, "platform");

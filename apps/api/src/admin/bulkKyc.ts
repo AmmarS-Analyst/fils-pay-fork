@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { insertAdminAuditLog } from "../adminAudit/log.js";
 import { withTransaction } from "../db/withTransaction.js";
+import { recordKycReviewInTx } from "../onboarding/review.js";
 
 export interface BulkApproveMerchantsKycInput {
   merchantIds: string[];
@@ -25,15 +26,30 @@ export async function bulkApproveMerchantsKyc(
   input: BulkApproveMerchantsKycInput,
 ): Promise<BulkApproveMerchantsKycResult> {
   return withTransaction(pool, async (client) => {
-    const result = await client.query<{ id: string }>(
-      `UPDATE merchants
-          SET onboarding_status = 'approved', kyc_passed = true
-        WHERE id = ANY($1::uuid[])
-          AND onboarding_status = 'under_review'
-      RETURNING id`,
+    // Same path as a single review (recordKycReviewInTx is the one place allowed
+    // to approve a merchant), so each approval leaves its own review record.
+    const eligible = await client.query<{ id: string }>(
+      `SELECT id FROM merchants
+        WHERE id = ANY($1::uuid[]) AND onboarding_status = 'under_review'
+        ORDER BY id
+        FOR UPDATE`,
       [input.merchantIds],
     );
-    const approvedMerchantIds = result.rows.map((row) => row.id);
+    const admin = await client.query<{ email: string }>(`SELECT email FROM admin_users WHERE id = $1`, [
+      input.adminUserId,
+    ]);
+    const reviewer = admin.rows[0]?.email ?? input.adminUserId;
+    const approvedMerchantIds: string[] = [];
+    for (const row of eligible.rows) {
+      await recordKycReviewInTx(client, {
+        merchantId: row.id,
+        outcome: "approved",
+        reviewerIdentifier: reviewer,
+        reviewerAdminUserId: input.adminUserId,
+        notes: input.notes,
+      });
+      approvedMerchantIds.push(row.id);
+    }
 
     await insertAdminAuditLog(client, {
       adminUserId: input.adminUserId,
