@@ -144,7 +144,7 @@ async function applyBatchClosed(client: PoolClient, row: OutboxEventRow): Promis
       `SELECT captured_count FROM merchant_daily_volume WHERE merchant_id = $1 AND volume_date = $2`,
       [payload.merchantId, payload.batchDate],
     );
-    const rollup = rollupResult.rows[0] as { captured_count: number };
+    const rollup = (rollupResult.rows[0] as { captured_count: number } | undefined) ?? { captured_count: 0 };
     if (rollup.captured_count < groundTruthCount) {
       console.warn(
         `reporting rollup lags ground truth for merchant ${payload.merchantId} on ${payload.batchDate}: ` +
@@ -189,6 +189,16 @@ export async function applyDailySummaryRollup(
  */
 export async function applyEvent(client: PoolClient, row: OutboxEventRow): Promise<void> {
   switch (row.event_type) {
+    case "settlement.paid":
+      await client.query(
+        `UPDATE merchant_payout_trends trend
+            SET status = batch.status, paid_at = batch.paid_at, last_updated_at = now()
+           FROM settlement_batches batch
+          WHERE batch.id = $1 AND trend.settlement_batch_id = batch.id
+            AND trend.merchant_id = batch.merchant_id`,
+        [row.aggregate_id],
+      );
+      return;
     case "transaction.captured":
       return applyTransactionCaptured(client, row);
     case "transaction.voided":

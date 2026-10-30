@@ -403,3 +403,17 @@ test("GET /v1/admin/credits filters by status", async () => {
     );
   }
 });
+
+test("support cannot create or post a below-threshold credit", async () => {
+  const support = await signedInAdmin("support", "create-denied");
+  const merchantId = await createMerchant("create-denied");
+  const res = await app.inject({
+    method: "POST",
+    url: `/v1/admin/merchants/${merchantId}/credits`,
+    headers: { cookie: support.cookie },
+    payload: { baseAmountFils: 40_000, reasonCode: "goodwill", effectiveDate: todayIso() },
+  });
+  assert.equal(res.statusCode, 403, res.body);
+  assert.equal((await pool.query(`SELECT 1 FROM credit_requests WHERE merchant_id = $1`, [merchantId])).rowCount, 0);
+  assert.equal((await pool.query(`SELECT 1 FROM ledger_entries WHERE merchant_id = $1`, [merchantId])).rowCount, 0);
+});

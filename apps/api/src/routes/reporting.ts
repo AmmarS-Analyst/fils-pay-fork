@@ -1,3 +1,4 @@
+import { assertInstantRange, assertUuid, isCalendarDate, optionalInstant } from "../lib/requestValidation.js";
 import type { FastifyInstance } from "fastify";
 import { requireMerchantAuth } from "../auth/requireMerchantAuth.js";
 import { runTransactionsReport, type TransactionReportFilter } from "../reporting/transactionsReportQuery.js";
@@ -34,6 +35,14 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new BadRequestError("invalid_filter");
+      if (parsed.merchantId !== undefined) assertUuid(parsed.merchantId);
+      if (parsed.status !== undefined && typeof parsed.status !== "string") throw new BadRequestError("invalid_filter");
+      const parseBound = (value: unknown): Date | undefined => {
+        if (isCalendarDate(value)) return new Date(`${value}T00:00:00Z`);
+        return optionalInstant(value);
+      };
+      assertInstantRange(parseBound(parsed.from), parseBound(parsed.to));
       const merchantId = await resolveReportMerchantId(
         app.db,
         request.merchantAuth!.merchantId,

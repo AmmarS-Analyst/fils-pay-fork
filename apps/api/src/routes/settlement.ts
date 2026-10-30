@@ -1,3 +1,4 @@
+import { assertCalendarRange, assertUuid, isCalendarDate, optionalLimit, validateCursor } from "../lib/requestValidation.js";
 import type { FastifyInstance } from "fastify";
 import { requireMerchantAuth, requireMerchantRole } from "../auth/requireMerchantAuth.js";
 import { NotFoundError, BadRequestError } from "../lib/errors.js";
@@ -41,7 +42,11 @@ export async function settlementRoutes(app: FastifyInstance): Promise<void> {
     async (request) => {
       const q = request.query;
       const status = q.status === undefined ? undefined : Array.isArray(q.status) ? q.status : [q.status];
-      const limit = q.limit !== undefined ? Number.parseInt(q.limit, 10) : undefined;
+      const limit = optionalLimit(q.limit);
+      validateCursor(q.cursor, "date");
+      if ((q.from !== undefined && !isCalendarDate(q.from)) || (q.to !== undefined && !isCalendarDate(q.to)) || (q.from && q.to && q.from >= q.to)) {
+        throw new BadRequestError("invalid_date");
+      }
 
       return listSettlementBatches(app.db, {
         merchantId: request.merchantAuth!.merchantId,
@@ -65,6 +70,7 @@ export async function settlementRoutes(app: FastifyInstance): Promise<void> {
         throw new BadRequestError("invalid_request", "from and to (YYYY-MM-DD) are required");
       }
 
+      assertCalendarRange(from, to);
       return getReconciliationReport(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         from,
@@ -83,6 +89,7 @@ export async function settlementRoutes(app: FastifyInstance): Promise<void> {
         throw new BadRequestError("invalid_request", "from and to (YYYY-MM-DD) are required");
       }
 
+      assertCalendarRange(from, to);
       return getSettlementSummary(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         from,
@@ -95,6 +102,7 @@ export async function settlementRoutes(app: FastifyInstance): Promise<void> {
     "/batches/:id",
     { preHandler: requireMerchantAuth },
     async (request) => {
+      assertUuid(request.params.id, "settlement_batch_not_found");
       const batch = await getSettlementBatch(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         batchId: request.params.id,
@@ -113,6 +121,7 @@ export async function settlementRoutes(app: FastifyInstance): Promise<void> {
       // Same merchant-scoped existence check as the detail route first
       // (404 if the parent batch isn't found/owned) before reading its
       // transactions.
+      assertUuid(request.params.id, "settlement_batch_not_found");
       const batch = await getSettlementBatch(app.db, {
         merchantId: request.merchantAuth!.merchantId,
         batchId: request.params.id,

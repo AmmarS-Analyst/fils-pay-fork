@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import type { ReportingConfig } from "../config.js";
 import { withTransaction } from "../db/withTransaction.js";
-import { resetCursor } from "../consumer/cursor.js";
+import { readCursor, resetCursor } from "../consumer/cursor.js";
 import { runConsumerPass, CONSUMER_NAME } from "../consumer/runConsumerPass.js";
 
 interface RollupCounts {
@@ -48,10 +48,14 @@ export async function runRebuild(pool: Pool, config: ReportingConfig): Promise<v
     `[reporting/rebuild] before: merchant_daily_volume=${before.volumeRows} rows, merchant_payout_trends=${before.trendRows} rows`,
   );
 
-  // FH: truncate + reset in one tx, replay outside it -- a live worker can race the replay? (MK: worker is stopped during rebuild per RUNBOOK)
+  // Reset under the consumer lock. Subsequent passes may share replay work
+  // with a live worker; transactional receipts prevent double application.
   await withTransaction(pool, async (client) => {
+    // Acquire the same lock as live consumers before taking table locks.
+    await readCursor(client, CONSUMER_NAME);
     await client.query(`TRUNCATE merchant_daily_volume`);
     await client.query(`TRUNCATE merchant_payout_trends`);
+    await client.query(`DELETE FROM reporting_processed_events WHERE consumer_name = $1`, [CONSUMER_NAME]);
     await resetCursor(client, CONSUMER_NAME);
   });
 

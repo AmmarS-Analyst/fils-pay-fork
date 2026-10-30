@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireMerchantAuth } from "../auth/requireMerchantAuth.js";
-import { BadRequestError } from "../lib/errors.js";
+import { assertCalendarRange, optionalLimit } from "../lib/requestValidation.js";
 import {
   clampTopLinksLimit,
   getPayoutTrends,
@@ -16,13 +16,6 @@ interface DateRangeQuery {
 
 interface TopLinksQuery extends DateRangeQuery {
   limit?: string;
-}
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Strict YYYY-MM-DD that also round-trips through Date (rejects 2026-02-30). */
-function isValidDateString(value: string): boolean {
-  return DATE_RE.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 function pad2(n: number): string {
@@ -72,9 +65,7 @@ function parseDateRange(query: DateRangeQuery): { from: string; to: string } {
   const from = query.from ?? addCalendarDays(today, -30);
   const to = query.to ?? addCalendarDays(today, 1);
 
-  if (!isValidDateString(from) || !isValidDateString(to)) {
-    throw new BadRequestError("invalid_date", "from/to must be valid YYYY-MM-DD dates");
-  }
+  assertCalendarRange(from, to);
   return { from, to };
 }
 
@@ -119,7 +110,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireMerchantAuth },
     async (request) => {
       const { from, to } = parseDateRange(request.query);
-      const rawLimit = request.query.limit !== undefined ? Number.parseInt(request.query.limit, 10) : undefined;
+      const rawLimit = optionalLimit(request.query.limit);
       const limit = clampTopLinksLimit(rawLimit);
 
       return getTopLinks(app.db, {
