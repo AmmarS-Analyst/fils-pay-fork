@@ -60,7 +60,7 @@ export function CheckoutPage() {
     setPayState({ kind: "submitting" });
 
     try {
-      const result = await payPaymentLink(token, { card, submittedAt }, idempotencyKey);
+      const result = await payPaymentLink(token, { card: { ...card, pan: card.pan.replace(/\D/g, "") }, submittedAt }, idempotencyKey);
       setPayState({ kind: "success", result });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -90,7 +90,7 @@ export function CheckoutPage() {
   if (loadState.kind === "loading") {
     return (
       <main className="checkout-page">
-        <p>Loading...</p>
+        <p role="status">Loading...</p>
       </main>
     );
   }
@@ -174,7 +174,11 @@ export function CheckoutPage() {
       {link.description ? <p className="checkout-description">{link.description}</p> : null}
       {link.reference ? <p className="checkout-reference">Reference: {link.reference}</p> : null}
 
-      {payState.kind === "declined" ? <p className="checkout-error">{payState.message}</p> : null}
+      {payState.kind === "declined" ? (
+        <p className="checkout-error" role="alert">
+          {payState.message}
+        </p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="checkout-form">
         <label>
@@ -182,12 +186,14 @@ export function CheckoutPage() {
           <input
             type="text"
             inputMode="numeric"
+            autoComplete="cc-number"
+            placeholder="1234 5678 9012 3456"
             required
             value={card.pan}
             onChange={(e) => {
-              const pan = e.target.value;
+              const digits = e.target.value.replace(/\D/g, "").slice(0, 19);
+              const pan = digits.replace(/(.{4})(?=.)/g, "$1 ");
               setCard({ ...card, pan });
-              const digits = pan.replace(/\D/g, "");
               if (digits.length >= 4) {
                 void import("../../utils/helpers.js").then((m) => {
                   setBrandHint(m.formatCardBrandHint(digits));
@@ -203,9 +209,11 @@ export function CheckoutPage() {
         </label>
         <div className="checkout-form-row">
           <label>
-            Expiry month
+            Month
             <input
               type="number"
+              inputMode="numeric"
+              autoComplete="cc-exp-month"
               min={1}
               max={12}
               required
@@ -214,9 +222,11 @@ export function CheckoutPage() {
             />
           </label>
           <label>
-            Expiry year
+            Year
             <input
               type="number"
+              inputMode="numeric"
+              autoComplete="cc-exp-year"
               min={new Date().getFullYear()}
               required
               value={card.expiryYear}
@@ -226,11 +236,13 @@ export function CheckoutPage() {
           <label>
             CVV
             <input
-              type="text"
+              type="password"
               inputMode="numeric"
+              autoComplete="cc-csc"
+              maxLength={4}
               required
               value={card.cvv}
-              onChange={(e) => setCard({ ...card, cvv: e.target.value })}
+              onChange={(e) => setCard({ ...card, cvv: e.target.value.replace(/\D/g, "") })}
             />
           </label>
         </div>
