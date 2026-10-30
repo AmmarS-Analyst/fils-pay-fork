@@ -496,6 +496,56 @@ test("a partially captured transaction cannot refund more than it captured", asy
   assert.equal((result.body as { code: string }).code, "refund_exceeds_refundable");
 });
 
+test("FP-209: two concurrent full refunds pay out once", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("concurrent-refund");
+  const txn = await capturedTransaction(rawKey, 5_000);
+  const actor = await apiKeyActor(merchantId);
+  // A slow acquirer widens the window between validation and journaling.
+  const slowAcquirer: AcquirerSimulator = {
+    ...approvingAcquirer,
+    refund: (req) =>
+      new Promise((resolve) =>
+        setTimeout(() => resolve({ outcome: "approved", acquirerReference: req.acquirerReference, latencyMs: 50 }), 50),
+      ),
+  };
+
+  const results = await Promise.all(
+    [0, 1].map(() =>
+      processRefund(pool, slowAcquirer, {
+        transactionId: txn.id,
+        merchantId,
+        amountFils: toFils(5_000),
+        idempotencyKey: randomUUID(),
+        actor,
+      }),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 422]);
+
+  const refunded = await pool.query<{ refunded_fils: string; n: string }>(
+    `SELECT t.refunded_fils, (SELECT count(*) FROM refunds r WHERE r.transaction_id = t.id) AS n
+       FROM transactions t WHERE t.id = $1`,
+    [txn.id],
+  );
+  assert.equal(Number(refunded.rows[0]!.refunded_fils), 5_000);
+  assert.equal(Number(refunded.rows[0]!.n), 1);
+});
+
+test("a declined refund releases its reservation so the amount stays refundable", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("decline-release");
+  const txn = await capturedTransaction(rawKey, 3_000);
+  const actor = await apiKeyActor(merchantId);
+
+  const declined = await processRefund(pool, fixedAcquirer("declined"), {
+    transactionId: txn.id, merchantId, amountFils: toFils(3_000), idempotencyKey: randomUUID(), actor,
+  });
+  assert.equal(declined.statusCode, 402);
+  const ok = await processRefund(pool, approvingAcquirer, {
+    transactionId: txn.id, merchantId, amountFils: toFils(3_000), idempotencyKey: randomUUID(), actor,
+  });
+  assert.equal(ok.statusCode, 200, JSON.stringify(ok.body));
+});
+
 test("another merchant's transaction id answers 404 and refunds nothing", async () => {
   const owner = await createApprovedMerchantWithApiKey("idor-owner");
   const attacker = await createApprovedMerchantWithApiKey("idor-attacker");

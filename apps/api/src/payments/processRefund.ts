@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { ZERO_FILS, addFils, calculateRefundFee, compareFils, subtractFils, toFils, type Fils } from "@filspay/money";
+import { ZERO_FILS, calculateRefundFee, compareFils, subtractFils, toFils, type Fils } from "@filspay/money";
 import { enqueueEvent } from "@filspay/events";
 import { withTransaction } from "../db/withTransaction.js";
 import type { AcquirerSimulator } from "../acquirer/types.js";
@@ -70,11 +70,12 @@ export async function processRefund(
       };
     }
 
-    // Scoped to the merchant, so one merchant can't refund another's payment.
+    // Scoped to the merchant, and locked so concurrent refunds queue up (FP-209).
     const txnResult = await client.query<RefundTransactionRow>(
       `SELECT id, merchant_id, status, amount_fils, captured_fils, refunded_fils, acquirer_reference
          FROM transactions
-        WHERE id = $1 AND merchant_id = $2`,
+        WHERE id = $1 AND merchant_id = $2
+        FOR UPDATE`,
       [input.transactionId, input.merchantId],
     );
     const txn = txnResult.rows[0];
@@ -126,6 +127,12 @@ export async function processRefund(
       throw new Error("processRefund: fee aggregate returned no row");
     }
 
+    // Reserve the amount before calling the acquirer (FP-209); released below on decline/error.
+    await client.query(`UPDATE transactions SET refunded_fils = refunded_fils + $2 WHERE id = $1`, [
+      txn.id,
+      validation.amountFils,
+    ]);
+
     return {
       kind: "proceed" as const,
       claimId: claim.row.id,
@@ -154,6 +161,12 @@ export async function processRefund(
 
   // 3 journal
   return withTransaction(pool, async (client) => {
+    if (acquirerResult.outcome === "declined" || acquirerResult.outcome === "error") {
+      await client.query(`UPDATE transactions SET refunded_fils = refunded_fils - $2 WHERE id = $1`, [
+        prepared.transactionId,
+        prepared.requestedAmount,
+      ]);
+    }
     if (acquirerResult.outcome === "declined") {
       const body = { error: "refund_declined" };
       await completeIdempotencyKey(client, prepared.claimId, { statusCode: 402, body });
@@ -165,7 +178,12 @@ export async function processRefund(
       return { statusCode: 502, body };
     }
 
-    const newRefundedTotal = addFils(prepared.refundedFils, prepared.requestedAmount);
+    // refunded_fils already includes this refund and any concurrent ones.
+    const current = await client.query<{ refunded_fils: string }>(
+      `SELECT refunded_fils FROM transactions WHERE id = $1 FOR UPDATE`,
+      [prepared.transactionId],
+    );
+    const newRefundedTotal = toFils(Number(current.rows[0]?.refunded_fils ?? 0));
     const newStatus = nextStatusAfterRefund({
       amountFils: prepared.amountAuthorized,
       capturedFils: prepared.capturedFils,
@@ -199,11 +217,7 @@ export async function processRefund(
       throw new Error("processRefund: insert into refunds returned no row");
     }
 
-    await client.query(`UPDATE transactions SET refunded_fils = $2, status = $3 WHERE id = $1`, [
-      prepared.transactionId,
-      newRefundedTotal,
-      newStatus,
-    ]);
+    await client.query(`UPDATE transactions SET status = $2 WHERE id = $1`, [prepared.transactionId, newStatus]);
 
     // Double-entry reversal, mirroring capture's legs with the directions
     // swapped. ledger_entries has CHECK (amount_fils > 0), so a reversal
