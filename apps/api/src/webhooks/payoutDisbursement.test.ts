@@ -37,7 +37,6 @@ async function createPaidBatch(netPayoutFils: number): Promise<string> {
   return batch.rows[0]!.id;
 }
 
-// FH: only checks the insert, not who calls it or how often
 test("recordPayoutDisbursementEffect inserts one row with the given batch id and amount", async () => {
   const batchId = await createPaidBatch(471_300);
 
@@ -55,4 +54,14 @@ test("recordPayoutDisbursementEffect inserts one row with the given batch id and
     "expected a generated disbursement reference distinct from the batch id",
   );
   assert.notEqual(result.rows[0]!.disbursement_reference, batchId);
+});
+
+test("one batch gets one disbursement record, however many endpoints or replays deliver settlement.paid", async () => {
+  const batchId = await createPaidBatch(90_000);
+
+  // Two endpoints plus a replay: three first-attempt deliveries of one event.
+  await Promise.all([1, 2, 3].map(() => recordPayoutDisbursementEffect(pool, batchId, 90_000)));
+
+  const result = await pool.query(`SELECT 1 FROM settlement_payout_disbursements WHERE settlement_batch_id = $1`, [batchId]);
+  assert.equal(result.rowCount, 1);
 });

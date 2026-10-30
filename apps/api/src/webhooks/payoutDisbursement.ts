@@ -1,6 +1,10 @@
 import type { Pool } from "pg";
+import { withTransaction } from "../db/withTransaction.js";
 
-/** Operational record of a payout-rail instruction for a settlement batch. */
+/**
+ * One payout-rail instruction per batch. The dispatcher calls this once per
+ * endpoint and per replay, so it has to be idempotent.
+ */
 export async function recordPayoutDisbursementEffect(
   pool: Pool,
   settlementBatchId: string,
@@ -10,10 +14,13 @@ export async function recordPayoutDisbursementEffect(
     // Void batches (zero or negative net) carry no payout instruction.
     return;
   }
-
-  await pool.query(
-    `INSERT INTO settlement_payout_disbursements (settlement_batch_id, amount_fils, disbursement_reference)
-     VALUES ($1, $2, 'disb_' || gen_random_uuid())`,
-    [settlementBatchId, amountFils],
-  );
+  await withTransaction(pool, async (client) => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`payout-disbursement:${settlementBatchId}`]);
+    await client.query(
+      `INSERT INTO settlement_payout_disbursements (settlement_batch_id, amount_fils, disbursement_reference)
+       SELECT $1, $2, 'disb_' || gen_random_uuid()
+        WHERE NOT EXISTS (SELECT 1 FROM settlement_payout_disbursements WHERE settlement_batch_id = $1)`,
+      [settlementBatchId, amountFils],
+    );
+  });
 }
