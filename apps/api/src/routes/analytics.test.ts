@@ -498,3 +498,8 @@ test("GET /v1/analytics/recent-ledger-activity: requires merchant auth, and reje
   assert.equal(res.statusCode, 400, res.body);
   assert.equal(res.json().error, "invalid_date");
 });
+
+test("GET /v1/reporting/export-summary requires a merchant credential (was a 500 for anonymous callers)", async () => {
+  const res = await app.inject({ method: "GET", url: "/v1/reporting/export-summary" });
+  assert.equal(res.statusCode, 401, res.body);
+});
