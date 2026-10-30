@@ -286,3 +286,14 @@
     box-shadow: none;
   }
 }
+
+.checkout-form input[type="number"]::-webkit-inner-spin-button,
+.checkout-form input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.checkout-form input[type="number"] {
+  -moz-appearance: textfield;
+  color-scheme: dark;
+}

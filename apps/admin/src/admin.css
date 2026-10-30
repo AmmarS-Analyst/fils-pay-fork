@@ -442,3 +442,191 @@ body {
   background: #dc2626;
   color: #fff;
 }
+
+/* --- form controls, shadcn-style (checkbox, date/time, select, textarea, number) --- */
+
+.admin-shell input[type="checkbox"],
+.admin-centered input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: inline-grid;
+  place-content: center;
+  border: 1px solid #52525b;
+  border-radius: 2px;
+  background: #09090b;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.admin-shell input[type="checkbox"]::before,
+.admin-centered input[type="checkbox"]::before {
+  content: "";
+  width: 9px;
+  height: 5px;
+  margin-top: -2px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) scale(0);
+  transition: transform 120ms ease;
+}
+
+.admin-shell input[type="checkbox"]:checked,
+.admin-centered input[type="checkbox"]:checked {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.admin-shell input[type="checkbox"]:checked::before,
+.admin-centered input[type="checkbox"]:checked::before {
+  transform: rotate(-45deg) scale(1);
+}
+
+.admin-shell input[type="checkbox"]:hover,
+.admin-centered input[type="checkbox"]:hover {
+  border-color: #a1a1aa;
+}
+
+.admin-shell input[type="checkbox"]:focus-visible,
+.admin-centered input[type="checkbox"]:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
+}
+
+.admin-shell label:has(> input[type="checkbox"]),
+.admin-centered label:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.admin-shell input[type="date"],
+.admin-shell input[type="datetime-local"],
+.admin-shell input[type="number"],
+.admin-shell input[type="search"],
+.admin-shell select,
+.admin-shell textarea,
+.admin-centered input[type="date"],
+.admin-centered input[type="datetime-local"],
+.admin-centered input[type="number"],
+.admin-centered input[type="search"],
+.admin-centered select,
+.admin-centered textarea {
+  min-height: 2.35rem;
+  padding: 0 0.7rem;
+  font: inherit;
+  color: #fafafa;
+  background: #09090b;
+  border: 1px solid #3f3f46;
+  border-radius: 2px;
+  color-scheme: dark;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.admin-shell textarea,
+.admin-centered textarea {
+  padding: 0.5rem 0.7rem;
+  line-height: 1.5;
+}
+
+.admin-shell input[type="date"]:focus,
+.admin-shell input[type="datetime-local"]:focus,
+.admin-shell input[type="number"]:focus,
+.admin-shell input[type="search"]:focus,
+.admin-shell select:focus,
+.admin-shell textarea:focus,
+.admin-centered input[type="date"]:focus,
+.admin-centered input[type="datetime-local"]:focus,
+.admin-centered input[type="number"]:focus,
+.admin-centered input[type="search"]:focus,
+.admin-centered select:focus,
+.admin-centered textarea:focus {
+  outline: none;
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25);
+}
+
+/* calendar / clock icon: light grey, red on hover */
+.admin-shell input[type="date"]::-webkit-calendar-picker-indicator,
+.admin-shell input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.admin-centered input[type="date"]::-webkit-calendar-picker-indicator,
+.admin-centered input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.75;
+  filter: none;
+  transition: opacity 120ms ease;
+}
+
+.admin-shell input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.admin-shell input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+.admin-centered input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.admin-centered input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  filter: brightness(0) saturate(100%) invert(22%) sepia(90%) saturate(4500%) hue-rotate(352deg);
+}
+
+.admin-shell input[type="date"]:not(:focus):invalid,
+.admin-centered input[type="date"]:not(:focus):invalid {
+  color: #71717a;
+}
+
+.admin-shell input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+.admin-centered input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  color: inherit;
+}
+
+/* select with our own chevron */
+.admin-shell select,
+.admin-centered select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  cursor: pointer;
+}
+
+.admin-shell select option,
+.admin-centered select option {
+  background: #111113;
+  color: #fafafa;
+}
+
+/* number fields: no spinner arrows */
+.admin-shell input[type="number"]::-webkit-inner-spin-button,
+.admin-shell input[type="number"]::-webkit-outer-spin-button,
+.admin-centered input[type="number"]::-webkit-inner-spin-button,
+.admin-centered input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.admin-shell input[type="number"],
+.admin-centered input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.admin-shell input[type="search"]::-webkit-search-cancel-button,
+.admin-centered input[type="search"]::-webkit-search-cancel-button {
+  filter: invert(1);
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+/* thin dark scrollbars (tables that scroll sideways on phones) */
+.admin-shell *,
+.admin-centered * {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+.admin-shell ::selection,
+.admin-centered ::selection {
+  background: rgba(220, 38, 38, 0.45);
+  color: #fff;
+}

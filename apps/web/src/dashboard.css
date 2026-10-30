@@ -888,3 +888,212 @@ body {
   color: #f87171;
   text-decoration-color: #f87171;
 }
+
+/* --- form controls, shadcn-style (checkbox, date/time, select, textarea, number) --- */
+
+.dash-shell input[type="checkbox"],
+.dash-centered input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: inline-grid;
+  place-content: center;
+  border: 1px solid #52525b;
+  border-radius: 2px;
+  background: #09090b;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.dash-shell input[type="checkbox"]::before,
+.dash-centered input[type="checkbox"]::before {
+  content: "";
+  width: 9px;
+  height: 5px;
+  margin-top: -2px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) scale(0);
+  transition: transform 120ms ease;
+}
+
+.dash-shell input[type="checkbox"]:checked,
+.dash-centered input[type="checkbox"]:checked {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.dash-shell input[type="checkbox"]:checked::before,
+.dash-centered input[type="checkbox"]:checked::before {
+  transform: rotate(-45deg) scale(1);
+}
+
+.dash-shell input[type="checkbox"]:hover,
+.dash-centered input[type="checkbox"]:hover {
+  border-color: #a1a1aa;
+}
+
+.dash-shell input[type="checkbox"]:focus-visible,
+.dash-centered input[type="checkbox"]:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
+}
+
+.dash-shell label:has(> input[type="checkbox"]),
+.dash-centered label:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.dash-shell input[type="date"],
+.dash-shell input[type="datetime-local"],
+.dash-shell input[type="number"],
+.dash-shell input[type="search"],
+.dash-shell select,
+.dash-shell textarea,
+.dash-centered input[type="date"],
+.dash-centered input[type="datetime-local"],
+.dash-centered input[type="number"],
+.dash-centered input[type="search"],
+.dash-centered select,
+.dash-centered textarea {
+  min-height: 2.35rem;
+  padding: 0 0.7rem;
+  font: inherit;
+  color: #fafafa;
+  background: #09090b;
+  border: 1px solid #3f3f46;
+  border-radius: 2px;
+  color-scheme: dark;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.dash-shell textarea,
+.dash-centered textarea {
+  padding: 0.5rem 0.7rem;
+  line-height: 1.5;
+}
+
+.dash-shell input[type="date"]:focus,
+.dash-shell input[type="datetime-local"]:focus,
+.dash-shell input[type="number"]:focus,
+.dash-shell input[type="search"]:focus,
+.dash-shell select:focus,
+.dash-shell textarea:focus,
+.dash-centered input[type="date"]:focus,
+.dash-centered input[type="datetime-local"]:focus,
+.dash-centered input[type="number"]:focus,
+.dash-centered input[type="search"]:focus,
+.dash-centered select:focus,
+.dash-centered textarea:focus {
+  outline: none;
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25);
+}
+
+/* calendar / clock icon: light grey, red on hover */
+.dash-shell input[type="date"]::-webkit-calendar-picker-indicator,
+.dash-shell input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.dash-centered input[type="date"]::-webkit-calendar-picker-indicator,
+.dash-centered input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.75;
+  filter: none;
+  transition: opacity 120ms ease;
+}
+
+.dash-shell input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.dash-shell input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+.dash-centered input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.dash-centered input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  filter: brightness(0) saturate(100%) invert(22%) sepia(90%) saturate(4500%) hue-rotate(352deg);
+}
+
+.dash-shell input[type="date"]:not(:focus):invalid,
+.dash-centered input[type="date"]:not(:focus):invalid {
+  color: #71717a;
+}
+
+.dash-shell input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+.dash-centered input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  color: inherit;
+}
+
+/* select with our own chevron */
+.dash-shell select,
+.dash-centered select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  cursor: pointer;
+}
+
+.dash-shell select option,
+.dash-centered select option {
+  background: #111113;
+  color: #fafafa;
+}
+
+/* number fields: no spinner arrows */
+.dash-shell input[type="number"]::-webkit-inner-spin-button,
+.dash-shell input[type="number"]::-webkit-outer-spin-button,
+.dash-centered input[type="number"]::-webkit-inner-spin-button,
+.dash-centered input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.dash-shell input[type="number"],
+.dash-centered input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.dash-shell input[type="search"]::-webkit-search-cancel-button,
+.dash-centered input[type="search"]::-webkit-search-cancel-button {
+  filter: invert(1);
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+/* thin dark scrollbars (tables that scroll sideways on phones) */
+.dash-shell *,
+.dash-centered * {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+.dash-shell ::selection,
+.dash-centered ::selection {
+  background: rgba(220, 38, 38, 0.45);
+  color: #fff;
+}
+
+/* status filter: checkbox chips instead of a bare row of boxes */
+.dash-filters label:has(> input[type="checkbox"]) {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid #27272a;
+  border-radius: 2px;
+  color: #a1a1aa;
+  font-size: 0.92em;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.dash-filters label:has(> input[type="checkbox"]):hover {
+  border-color: #52525b;
+  color: #fafafa;
+}
+
+.dash-filters label:has(> input[type="checkbox"]:checked) {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+  color: #fafafa;
+}
