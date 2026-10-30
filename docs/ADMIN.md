@@ -97,8 +97,8 @@ deliveries.
 archive the endpoint's history; after they register the new one, restore
 the archive against it to backfill. No screen for this yet — it's
 `POST /v1/admin/merchants/:id/webhook-endpoints/:endpointId/archive` and
-`.../archive/:archiveId/replay`. Archives are written in pages of 1000
-deliveries, so any range is fine.
+`.../archive/:archiveId/replay`. One archive holds at most 5,000
+deliveries; split longer ranges into several archives.
 
 ## Incident review: duplicate `settlement.paid` (2026-08-21)
 

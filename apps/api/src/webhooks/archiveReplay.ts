@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import { insertAdminAuditLog } from "../adminAudit/log.js";
 import { withTransaction } from "../db/withTransaction.js";
-import { ConflictError, NotFoundError } from "../lib/errors.js";
+import { ConflictError, NotFoundError, UnprocessableEntityError } from "../lib/errors.js";
 import { insertReplayDeliveryRow } from "./replay.js";
 
 export interface ArchivedDeliveryEntry {
@@ -25,6 +25,11 @@ export interface CreateArchiveResult {
  * team, or a future auditor, needs the *complete* record for the range they
  * were told the archive covers).
  */
+/** One archive is one in-memory array and one TEXT value. There is no paging
+ *  (ADMIN.md says there is), so cap it rather than let a wide range load a
+ *  year of deliveries into a 512 MB process. */
+export const MAX_ARCHIVE_DELIVERIES = 5_000;
+
 export async function createWebhookDeliveryArchive(
   pool: Pool,
   input: { merchantId: string; endpointId: string; adminUserId: string; from: Date; to: Date },
@@ -36,6 +41,17 @@ export async function createWebhookDeliveryArchive(
     );
     if (!endpoint.rows[0]) {
       throw new NotFoundError("webhook_endpoint_not_found");
+    }
+
+    const counted = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM webhook_deliveries WHERE endpoint_id = $1 AND created_at >= $2 AND created_at < $3`,
+      [input.endpointId, input.from, input.to],
+    );
+    if (Number(counted.rows[0]?.n ?? 0) > MAX_ARCHIVE_DELIVERIES) {
+      throw new UnprocessableEntityError(
+        "archive_range_too_large",
+        `more than ${MAX_ARCHIVE_DELIVERIES} deliveries in range; archive a shorter period`,
+      );
     }
 
     const rows = await client.query<{
