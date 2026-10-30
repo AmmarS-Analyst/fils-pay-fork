@@ -17,12 +17,33 @@ test("an operator cannot approve their own credit request", () => {
   );
 });
 
-// FH: added a same-id/different-name case per copilot locally, it passes, so ids are covered too
+
 test("two different operators satisfy two-person control", () => {
   assert.doesNotThrow(() =>
     assertDistinctApprover(
       { adminUserId: randomUUID(), displayName: "Dana Finance" },
       { adminUserId: randomUUID(), displayName: "Omar Treasury" },
+    ),
+  );
+});
+
+test("same admin who renamed themselves still cannot self-approve", () => {
+  const id = randomUUID();
+  assert.throws(
+    () =>
+      assertDistinctApprover(
+        { adminUserId: id, displayName: "Dana Finance" },
+        { adminUserId: id, displayName: "Dana F." },
+      ),
+    /self_approval_forbidden/,
+  );
+});
+
+test("two different admins who share a display name can approve each other", () => {
+  assert.doesNotThrow(() =>
+    assertDistinctApprover(
+      { adminUserId: randomUUID(), displayName: "Ali" },
+      { adminUserId: randomUUID(), displayName: "Ali" },
     ),
   );
 });
