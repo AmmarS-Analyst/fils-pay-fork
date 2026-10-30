@@ -250,6 +250,32 @@ test("login with the wrong password is rejected with a generic invalid_credentia
   assert.equal(res.json().error, "invalid_credentials");
 });
 
+test("requesting a new OTP does not give back the used guesses", async () => {
+  const password = "correct horse battery staple 1!";
+  const { merchantId, email } = await signup("resend-budget", password);
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { merchantId, email, password } });
+  assert.equal(login.statusCode, 200, login.body);
+  const cookie = parseCookie(login.headers["set-cookie"]);
+
+  // Use up most of the guesses with wrong codes.
+  for (let i = 0; i < config.otpMaxAttempts - 1; i++) {
+    const bad = await app.inject({ method: "POST", url: "/v1/auth/otp/verify", headers: { cookie }, payload: { code: "000000" } });
+    assert.equal(bad.statusCode, 401, bad.body);
+  }
+
+  // Pretend 30s passed so the resend is allowed, then resend.
+  await pool.query(`UPDATE otp_challenges SET created_at = now() - interval '1 minute' WHERE merchant_user_id IN (SELECT id FROM merchant_users WHERE merchant_id = $1)`, [merchantId]);
+  const resend = await app.inject({ method: "POST", url: "/v1/auth/otp/resend", headers: { cookie } });
+  assert.equal(resend.statusCode, 200, resend.body);
+
+  const used = await pool.query<{ attempt_count: number }>(
+    `SELECT c.attempt_count FROM sessions s JOIN otp_challenges c ON c.id = s.otp_challenge_id
+      WHERE s.merchant_user_id IN (SELECT id FROM merchant_users WHERE merchant_id = $1) ORDER BY s.created_at DESC LIMIT 1`,
+    [merchantId],
+  );
+  assert.equal(used.rows[0]!.attempt_count, config.otpMaxAttempts - 1);
+});
+
 test("otp verify with the wrong code is rejected", async () => {
   const password = "another-real-password-456";
   const { merchantId, email } = await signup("wrongotp", password);
