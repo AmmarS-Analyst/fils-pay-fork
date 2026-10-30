@@ -1090,6 +1090,17 @@ for (const role of ["finance", "super_admin"] as const) {
       payload: { amountFils: 1000, expiresAt: new Date(Date.now() + 3_600_000).toISOString() },
     });
     assert.equal(createLinkRes.statusCode, 403, createLinkRes.body);
+
+    // Money-moving routes are refused too (capture/void/refund had no role check).
+    for (const url of [`/v1/transactions/${randomUUID()}/capture`, `/v1/transactions/${randomUUID()}/void`, "/v1/refunds"]) {
+      const res = await app.inject({
+        method: "POST",
+        url,
+        headers: { cookie: impCookie, "idempotency-key": randomUUID() },
+        payload: { transactionId: randomUUID() },
+      });
+      assert.equal(res.statusCode, 403, `${url} -> ${res.body}`);
+    }
   });
 }
 
