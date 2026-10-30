@@ -1,6 +1,6 @@
 # UI/UX changes
 
-Six small commits on `apps/web`, each with a reason. Screenshots are taken at
+Seven small commits on `apps/web`, each with a reason. Screenshots are taken at
 390 px (phone) and 1100 px (desktop) with a headless Chrome against the Vite
 dev server and a stub of the payment-link API (the stub only answers the two
 checkout calls; the declined card ends in `0002`). "Before" is the code at
@@ -14,6 +14,7 @@ checkout calls; the declined card ends in `0002`). "Before" is the code at
 | 4 | `f1b485f` refund drawer | Errors not announced, amount box needed a click, no quick way to refund the remainder | Amount focused on open, `role="alert"` errors, "Use full amount" button; a partial refund is still a typed amount |
 | 5 | `ac8a78b` transaction list | The list had no refund information, amounts were left-aligned (9.990 vs 1234.567 could not be compared) and `partially_refunded` had no colour | New Refunded column, right-aligned tabular money columns (also in the event timeline), status shown as words |
 | 6 | `884415c` dashboard on phones | At 390 px the detail page and event table were wider than the screen and clipped the status; no visible keyboard focus; current page only bold | Detail rows stack, tables scroll inside themselves, focus ring, underline bar on the current nav item, primary submit buttons |
+| 7 | `46ea668` minimal restyle | Pages looked unfinished: browser-default controls, heavy table grid, mixed button styles | CSS only, no new elements: one neutral palette, white cards, soft status pills, quiet table headers, dark primary buttons, focus halo, short transitions; checkout as a centred card |
 
 ## Before / after
 
@@ -42,8 +43,6 @@ in `docs/ui/` with the same names.
 
 ## Not changed, on purpose
 
-* Visual restyle of the merchant dashboard: not worth the risk this close to
-  the deadline; the checkout and the refund path are what a judge uses.
 * The dashboard was screenshotted against a stub API, not the real one; the live server run should re-check the same three screens.
 * The checkout still prints the simulated-acquirer test-card help text. It is
   true and useful for the demo; remove it for a real launch.
