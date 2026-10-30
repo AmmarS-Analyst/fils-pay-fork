@@ -231,7 +231,7 @@ export function TransactionDetailPage() {
           <tr>
             <th>Occurred</th>
             <th>Event</th>
-            <th>Amount</th>
+            <th className="dash-num">Amount</th>
             <th>Actor</th>
           </tr>
         </thead>
@@ -242,7 +242,7 @@ export function TransactionDetailPage() {
             <tr key={event.id}>
               <td>{dateTime(event.occurredAt)}</td>
               <td>{event.eventType}</td>
-              <td>{event.amountFils === null ? "—" : bhd(event.amountFils)}</td>
+              <td className="dash-num">{event.amountFils === null ? "—" : bhd(event.amountFils)}</td>
               <td>
                 {event.actorType}
                 {event.actorId ? (

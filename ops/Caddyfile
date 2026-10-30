@@ -1,0 +1,64 @@
+# Edge for the hosted stack: TLS, security headers, the two static front ends and
+# the API on the same origin (so the browser never makes a cross-origin call and
+# the session cookies stay first-party).
+#
+#   https://<SITE_ADDRESS>          merchant dashboard + hosted checkout + /v1 API
+#   https://<ADMIN_ADDRESS>         admin console + /v1 API   (same host, other port)
+#
+# SITE_ADDRESS / ADMIN_ADDRESS / ACME_EMAIL come from ops/.env.prod. For a plain
+# HTTP smoke test use SITE_ADDRESS=:80 and ADMIN_ADDRESS=:8080 (then also set
+# COOKIE_SECURE=false, otherwise browsers will not send the session cookie).
+
+{
+	email {$ACME_EMAIL}
+}
+
+(app) {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		-Server
+	}
+
+	# API: only /v1 and the two health endpoints are reachable from outside.
+	# 12 MB covers the 8 MiB KYC upload cap plus multipart overhead.
+	handle /v1/* {
+		request_body {
+			max_size 12MB
+		}
+		reverse_proxy api:3000 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 30s
+			}
+		}
+	}
+	handle /healthz {
+		reverse_proxy api:3000
+	}
+	handle /readyz {
+		reverse_proxy api:3000
+	}
+
+	# Everything else is the single-page app; unknown paths fall back to
+	# index.html so deep links (/checkout/<token>, /transactions/<id>) work.
+	handle {
+		root * {args[0]}
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+{$SITE_ADDRESS} {
+	import app /srv/web
+}
+
+{$ADMIN_ADDRESS} {
+	import app /srv/admin
+}

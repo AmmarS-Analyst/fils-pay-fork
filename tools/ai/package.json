@@ -1,0 +1,10 @@
+{
+  "name": "filspay-ai-tools",
+  "private": true,
+  "type": "module",
+  "description": "Helper scripts for AI-assisted work on FilsPay. Deliberately NOT part of the root workspaces: install on demand with `npm install --prefix tools/ai`.",
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.9",
+    "@electric-sql/pglite-socket": "0.2.12"
+  }
+}

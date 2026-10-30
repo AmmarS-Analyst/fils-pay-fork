@@ -134,8 +134,9 @@ export function TransactionListPage() {
             <th>Occurred</th>
             <th>Reference</th>
             <th>Status</th>
-            <th>Authorized</th>
-            <th>Captured</th>
+            <th className="dash-num">Authorized</th>
+            <th className="dash-num">Captured</th>
+            <th className="dash-num">Refunded</th>
             <th>Acquirer reference</th>
           </tr>
         </thead>
@@ -147,10 +148,11 @@ export function TransactionListPage() {
               </td>
               <td>{dash(txn.reference)}</td>
               <td>
-                <span className={classNames("dash-status", `dash-status-${txn.status}`)}>{txn.status}</span>
+                <span className={classNames("dash-status", `dash-status-${txn.status}`)}>{txn.status.replace(/_/g, " ")}</span>
               </td>
-              <td>{bhd(txn.amountFils)}</td>
-              <td>{bhd(txn.capturedFils)}</td>
+              <td className="dash-num">{bhd(txn.amountFils)}</td>
+              <td className="dash-num">{bhd(txn.capturedFils)}</td>
+              <td className="dash-num">{txn.refundedFils > 0 ? bhd(txn.refundedFils) : "—"}</td>
               <td>
                 <code>{truncateMiddle(txn.acquirerReference, 20)}</code>
               </td>
@@ -158,7 +160,7 @@ export function TransactionListPage() {
           ))}
           {transactions.length === 0 && !loading ? (
             <tr>
-              <td colSpan={6}>No transactions match these filters.</td>
+              <td colSpan={7}>No transactions match these filters.</td>
             </tr>
           ) : null}
         </tbody>

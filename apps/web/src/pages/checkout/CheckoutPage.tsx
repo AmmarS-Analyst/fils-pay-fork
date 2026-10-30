@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { formatBhd, toFils } from "@filspay/money";
 import { getPaymentLink, payPaymentLink } from "../../api/paymentLinks.js";
 import { ApiError } from "../../api/client.js";
+import { dateTime } from "../../format.js";
 import type { PaymentLinkPublicDto, PayPaymentLinkResponse, SimulatedCardInput } from "../../types.js";
 import "./CheckoutPage.css";
 
@@ -60,7 +61,7 @@ export function CheckoutPage() {
     setPayState({ kind: "submitting" });
 
     try {
-      const result = await payPaymentLink(token, { card, submittedAt }, idempotencyKey);
+      const result = await payPaymentLink(token, { card: { ...card, pan: card.pan.replace(/\D/g, "") }, submittedAt }, idempotencyKey);
       setPayState({ kind: "success", result });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -90,7 +91,7 @@ export function CheckoutPage() {
   if (loadState.kind === "loading") {
     return (
       <main className="checkout-page">
-        <p>Loading...</p>
+        <p role="status">Loading...</p>
       </main>
     );
   }
@@ -108,15 +109,23 @@ export function CheckoutPage() {
 
   if (payState.kind === "success") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page" role="status">
         <h1>Payment successful</h1>
-        <p>Thank you — your payment has been received.</p>
-        <dl>
-          <dt>Transaction ID</dt>
-          <dd>{payState.result.transactionId}</dd>
-          <dt>Paid at</dt>
-          <dd>{payState.result.paidAt}</dd>
+        <p className="checkout-amount">{formatBhd(toFils(payState.result.amountFils))} BHD</p>
+        <p>Thank you, {link.merchantDisplayName} has received your payment.</p>
+        <dl className="checkout-receipt">
+          {link.reference ? (
+            <>
+              <dt>Reference</dt>
+              <dd>{link.reference}</dd>
+            </>
+          ) : null}
+          <dt>Paid on</dt>
+          <dd>{dateTime(payState.result.paidAt)} (Bahrain time)</dd>
+          <dt>Receipt number</dt>
+          <dd className="checkout-mono">{payState.result.transactionId}</dd>
         </dl>
+        <p className="checkout-help">Keep the receipt number if you need to ask about this payment.</p>
       </main>
     );
   }
@@ -174,7 +183,11 @@ export function CheckoutPage() {
       {link.description ? <p className="checkout-description">{link.description}</p> : null}
       {link.reference ? <p className="checkout-reference">Reference: {link.reference}</p> : null}
 
-      {payState.kind === "declined" ? <p className="checkout-error">{payState.message}</p> : null}
+      {payState.kind === "declined" ? (
+        <p className="checkout-error" role="alert">
+          {payState.message}
+        </p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="checkout-form">
         <label>
@@ -182,12 +195,14 @@ export function CheckoutPage() {
           <input
             type="text"
             inputMode="numeric"
+            autoComplete="cc-number"
+            placeholder="1234 5678 9012 3456"
             required
             value={card.pan}
             onChange={(e) => {
-              const pan = e.target.value;
+              const digits = e.target.value.replace(/\D/g, "").slice(0, 19);
+              const pan = digits.replace(/(.{4})(?=.)/g, "$1 ");
               setCard({ ...card, pan });
-              const digits = pan.replace(/\D/g, "");
               if (digits.length >= 4) {
                 void import("../../utils/helpers.js").then((m) => {
                   setBrandHint(m.formatCardBrandHint(digits));
@@ -203,9 +218,11 @@ export function CheckoutPage() {
         </label>
         <div className="checkout-form-row">
           <label>
-            Expiry month
+            Month
             <input
               type="number"
+              inputMode="numeric"
+              autoComplete="cc-exp-month"
               min={1}
               max={12}
               required
@@ -214,9 +231,11 @@ export function CheckoutPage() {
             />
           </label>
           <label>
-            Expiry year
+            Year
             <input
               type="number"
+              inputMode="numeric"
+              autoComplete="cc-exp-year"
               min={new Date().getFullYear()}
               required
               value={card.expiryYear}
@@ -226,11 +245,13 @@ export function CheckoutPage() {
           <label>
             CVV
             <input
-              type="text"
+              type="password"
               inputMode="numeric"
+              autoComplete="cc-csc"
+              maxLength={4}
               required
               value={card.cvv}
-              onChange={(e) => setCard({ ...card, cvv: e.target.value })}
+              onChange={(e) => setCard({ ...card, cvv: e.target.value.replace(/\D/g, "") })}
             />
           </label>
         </div>

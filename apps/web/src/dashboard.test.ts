@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildQuery } from "./api/query.js";
-import { bhd, dash, dayStartIso, localDateTimeToIso } from "./format.js";
+import { bhd, dash, dateTime, dayStartIso, localDateTimeToIso } from "./format.js";
 
 /**
  * The pure logic behind the dashboard's query strings and money/date display.
@@ -63,4 +63,11 @@ test("localDateTimeToIso rejects garbage instead of sending Invalid Date", () =>
   const iso = localDateTimeToIso("2026-09-12T14:30");
   assert.notEqual(iso, null);
   assert.equal(new Date(iso ?? "").getTime(), new Date("2026-09-12T14:30").getTime());
+});
+
+test("dateTime shows Bahrain time whatever the browser zone is", () => {
+  // 21:30 UTC is already the next day in Bahrain
+  assert.match(dateTime("2026-10-30T21:30:00Z"), /31 Oct 2026.*00:30/);
+  assert.equal(dateTime(null), "—");
+  assert.equal(dateTime("garbage"), "—");
 });

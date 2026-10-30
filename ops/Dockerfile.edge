@@ -1,0 +1,23 @@
+# Edge image: builds the merchant dashboard/checkout (apps/web) and the admin
+# console (apps/admin) and serves them with Caddy, which also terminates TLS and
+# proxies /v1 to the API. Both front ends are built for the SAME origin as the
+# API (empty API base URL), so there is no CORS and no hard-coded host.
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
+COPY packages ./packages
+COPY apps ./apps
+RUN npm ci --no-audit --no-fund
+
+# Public URL of the merchant side (https://shop.example.com): the admin console
+# links to it for "view as merchant".
+ARG PUBLIC_URL
+ENV VITE_API_BASE_URL="" \
+    VITE_ADMIN_API_BASE_URL="" \
+    VITE_WEB_BASE_URL="${PUBLIC_URL}"
+RUN npm run build --workspace @filspay/web && npm run build --workspace @filspay/admin
+
+FROM caddy:2-alpine
+COPY ops/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/apps/web/dist /srv/web
+COPY --from=build /app/apps/admin/dist /srv/admin

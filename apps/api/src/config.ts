@@ -39,6 +39,11 @@ export interface Config {
   cookieName: string;
   /** Browser origins allowed to call the API with credentials (the dashboards). */
   corsOrigins: string[];
+  /** True when the API sits behind our own reverse proxy (hosted setup), so the
+   *  client address comes from X-Forwarded-For. Never set it when the API is exposed directly. */
+  trustProxy: boolean;
+  /** Max payment writes in flight before the API answers 503. 0 turns the guard off. */
+  maxInflightPayments: number;
   cookieSecure: boolean;
 
   /** Cookie carrying an `admin_sessions` token. A completely separate name,
@@ -152,7 +157,8 @@ function parseBoolEnv(value: string | undefined, fallback: boolean): boolean {
   return value === "true" || value === "1";
 }
 
-const DEV_FALLBACK_WEBHOOK_KEY_B64 = "Zmlsc3BheS1kZXYtb25seS1rZXktMzItYnl0ZXMhISE=";
+// must decode to exactly 32 bytes, like a real key (the old one was 34 and crashed every dev boot)
+const DEV_FALLBACK_WEBHOOK_KEY_B64 = "ZGV2LW9ubHktd2ViaG9vay1rZXktbm90LWZvci1wcmQ=";
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -229,6 +235,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : null,
 
     cookieName: env.COOKIE_NAME ?? "fp_sid",
+    trustProxy: parseBoolEnv(env.TRUST_PROXY, false),
+    maxInflightPayments: parseIntEnv(env.MAX_INFLIGHT_PAYMENTS, parseIntEnv(env.PG_POOL_MAX, 5) * 2),
     corsOrigins: (env.CORS_ORIGINS || "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174")
       .split(",")
       .map((o) => o.trim())

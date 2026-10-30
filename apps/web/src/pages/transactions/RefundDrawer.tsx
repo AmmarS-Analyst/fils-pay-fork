@@ -93,7 +93,11 @@ export function RefundDrawer({ txn, onRefunded }: RefundDrawerProps) {
   return (
     <RequireRole allow={["owner", "finance"]}>
       <div className="dash-actions">
-        {error ? <p className="dash-error">{error}</p> : null}
+        {error ? (
+          <p className="dash-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         {open ? (
           <form className="dash-form dash-form-inline" onSubmit={(e) => void handleRefund(e)}>
             <label>
@@ -101,12 +105,19 @@ export function RefundDrawer({ txn, onRefunded }: RefundDrawerProps) {
               <input
                 type="text"
                 inputMode="decimal"
+                autoFocus
+                aria-describedby="refundable-hint"
                 placeholder={formatBhd(toFils(refundableFils))}
                 value={amount}
                 onChange={(e) => changeAmount(e.target.value)}
               />
             </label>
-            <p className="dash-muted">Still refundable: {bhd(refundableFils)}</p>
+            <p className="dash-muted" id="refundable-hint">
+              Still refundable: {bhd(refundableFils)}{" "}
+              <button type="button" className="dash-button" disabled={submitting} onClick={() => changeAmount(formatBhd(toFils(refundableFils)))}>
+                Use full amount
+              </button>
+            </p>
             <button type="submit" className="dash-button" disabled={submitting}>
               {submitting ? "Refunding..." : "Refund"}
             </button>

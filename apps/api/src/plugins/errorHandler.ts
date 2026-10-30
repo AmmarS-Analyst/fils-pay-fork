@@ -31,6 +31,13 @@ export function errorHandler(
     return;
   }
 
+  // Fastify marks client mistakes (malformed JSON, empty JSON body, bad content type) with a 4xx.
+  // Those are the caller's fault, not ours: answer 400, not 500.
+  if (fastifyErr.statusCode !== undefined && fastifyErr.statusCode >= 400 && fastifyErr.statusCode < 500) {
+    reply.code(400).send({ error: "invalid_request", message: fastifyErr.message });
+    return;
+  }
+
   request.log.error({ err, occurredOn: formatIsoDate(new Date()) }, "unhandled error");
   reply.code(500).send({ error: "internal_error" });
 }

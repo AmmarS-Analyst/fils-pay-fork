@@ -19,9 +19,22 @@ export function dash(value: string | number | null | undefined): string {
   return value === null || value === undefined || value === "" ? "—" : String(value);
 }
 
-/** Browser-local rendering, not Asia/Bahrain. */
+/** Shown in Bahrain time (UTC+3), the same clock the settlement day uses, so a
+ *  late-evening payment lands on the day the reports say it did. */
+const BAHRAIN_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Bahrain",
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 export function dateTime(iso: string | null | undefined): string {
-  return iso ? new Date(iso).toLocaleString() : "—";
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : BAHRAIN_FORMAT.format(d);
 }
 
 /**

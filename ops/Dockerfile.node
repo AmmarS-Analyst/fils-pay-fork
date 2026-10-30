@@ -8,3 +8,8 @@ COPY apps ./apps
 COPY db ./db
 COPY scripts ./scripts
 RUN npm ci --no-audit --no-fund
+
+# Run as the unprivileged "node" user. /data/kyc is where the API stores KYC
+# uploads; mount a volume there (docker-compose.prod.yml does).
+RUN mkdir -p /data/kyc && chown -R node:node /data
+USER node
