@@ -52,7 +52,7 @@ test("a second partial refund completing the captured total is accepted", () => 
   assert.deepEqual(result, { ok: true, amountFils: 4_000 });
 });
 
-// MK: name is misleading, it can refund up to the authorized amount. rename later
+
 test("a partially captured transaction can refund what it captured", () => {
   const result = validateRefundRequest(
     txn({ status: "partially_captured", amountFils: 10_000, capturedFils: 4_000 }),

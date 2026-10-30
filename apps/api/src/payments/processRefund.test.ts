@@ -481,6 +481,21 @@ test("unknown transaction ids answer 404", async () => {
 
 // ------------------------------------------------------------ audit fixes
 
+test("a partially captured transaction cannot refund more than it captured", async () => {
+  const { merchantId, rawKey } = await createApprovedMerchantWithApiKey("over-refund");
+  const txn = await capturedTransaction(rawKey, 10_000, 4_000);
+
+  const result = await processRefund(pool, approvingAcquirer, {
+    transactionId: txn.id,
+    merchantId,
+    amountFils: toFils(10_000),
+    idempotencyKey: randomUUID(),
+    actor: await apiKeyActor(merchantId),
+  });
+  assert.equal(result.statusCode, 422, JSON.stringify(result.body));
+  assert.equal((result.body as { code: string }).code, "refund_exceeds_refundable");
+});
+
 test("another merchant's transaction id answers 404 and refunds nothing", async () => {
   const owner = await createApprovedMerchantWithApiKey("idor-owner");
   const attacker = await createApprovedMerchantWithApiKey("idor-attacker");
