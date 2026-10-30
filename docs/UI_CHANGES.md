@@ -1,6 +1,6 @@
 # UI/UX changes
 
-Four small commits on `apps/web`, each with a reason. Screenshots are taken at
+Six small commits on `apps/web`, each with a reason. Screenshots are taken at
 390 px (phone) and 1100 px (desktop) with a headless Chrome against the Vite
 dev server and a stub of the payment-link API (the stub only answers the two
 checkout calls; the declined card ends in `0002`). "Before" is the code at
@@ -12,8 +12,23 @@ checkout calls; the declined card ends in `0002`). "Before" is the code at
 | 2 | `445b661` dashboard times | `toLocaleString()` used the viewer's zone, so a payment could show on a different day than the settlement report | Times render in Asia/Bahrain; the layout says "Times are shown in Bahrain time (UTC+3)". Test fails on the old code when the browser zone is not Bahrain |
 | 3 | `3be814f` checkout success | Showed a raw ISO string (`2026-10-30T14:02:51.585Z`) and never said how much was paid | Receipt-style screen: amount, merchant, reference, readable Bahrain time, receipt number |
 | 4 | `f1b485f` refund drawer | Errors not announced, amount box needed a click, no quick way to refund the remainder | Amount focused on open, `role="alert"` errors, "Use full amount" button; a partial refund is still a typed amount |
+| 5 | `ac8a78b` transaction list | The list had no refund information, amounts were left-aligned (9.990 vs 1234.567 could not be compared) and `partially_refunded` had no colour | New Refunded column, right-aligned tabular money columns (also in the event timeline), status shown as words |
+| 6 | `884415c` dashboard on phones | At 390 px the detail page and event table were wider than the screen and clipped the status; no visible keyboard focus; current page only bold | Detail rows stack, tables scroll inside themselves, focus ring, underline bar on the current nav item, primary submit buttons |
 
 ## Before / after
+
+Dashboard screenshots use a stub of the merchant API with six sample
+transactions (login, list, and the refund drawer open on a partially refunded
+payment). "Before" for the dashboard is `d66ffb9`, so it already contains
+the Bahrain-time and refund-drawer commits above.
+
+| Screen | Before | After |
+|---|---|---|
+| Desktop, transactions | ![](ui/before-dash-desktop-2-list.png) | ![](ui/after-dash-desktop-2-list.png) |
+| Phone, transaction detail with refund open | ![](ui/before-dash-mobile-3-detail-refund.png) | ![](ui/after-dash-mobile-3-detail-refund.png) |
+| Phone, sign-in | ![](ui/before-dash-mobile-1-login.png) | ![](ui/after-dash-mobile-1-login.png) |
+
+Checkout (stub of the payment-link API):
 
 | Screen | Before | After |
 |---|---|---|
@@ -29,8 +44,6 @@ in `docs/ui/` with the same names.
 
 * Visual restyle of the merchant dashboard: not worth the risk this close to
   the deadline; the checkout and the refund path are what a judge uses.
-* The refund drawer and dashboard were not screenshotted (they need a login
-  session; the stub does not fake one). Those two changes are covered by the
-  type check, the build and the unit test for the date helper.
+* The dashboard was screenshotted against a stub API, not the real one; the live server run should re-check the same three screens.
 * The checkout still prints the simulated-acquirer test-card help text. It is
   true and useful for the demo; remove it for a real launch.
