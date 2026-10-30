@@ -165,6 +165,29 @@ async function authorizeAndCapture(merchantId: string, amountFils: number, label
   return txnId;
 }
 
+test("deleting an endpoint that has delivery history is a 409 (disable it instead), not a 500", async () => {
+  const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("delete-history");
+  const created = await createEndpointViaRoute(rawKey, merchantId, "http://localhost:9/webhook");
+  const event = await pool.query<{ id: string }>(
+    `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload)
+     VALUES ('transaction.captured', 'transaction', $1, '{}') RETURNING id`,
+    [randomUUID()],
+  );
+  await pool.query(
+    `INSERT INTO webhook_deliveries (endpoint_id, outbox_event_id, event_type, delivery_event_id, payload, status, next_attempt_at)
+     VALUES ($1, $2, 'transaction.captured', $3, '{}', 'succeeded', now())`,
+    [created.id, event.rows[0]!.id, randomUUID()],
+  );
+
+  const res = await app.inject({
+    method: "DELETE",
+    url: `/v1/merchants/${merchantId}/webhook-endpoints/${created.id}`,
+    headers: authHeader(rawKey),
+  });
+  assert.equal(res.statusCode, 409, res.body);
+  assert.equal(res.json().error, "endpoint_has_deliveries");
+});
+
 test("PATCH with an invalid status is a 400, not a 500", async () => {
   const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("bad-status");
   const created = await createEndpointViaRoute(rawKey, merchantId, "http://localhost:9/webhook");

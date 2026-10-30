@@ -1,26 +1,33 @@
 import type { Pool } from "pg";
+import { ConflictError } from "../lib/errors.js";
 
-/** "deleted" also when the endpoint had deliveries; those rows are kept with endpoint_id set to NULL. */
 export type DeleteWebhookEndpointResult = "deleted" | "not_found";
 
 /**
  * `DELETE /v1/merchants/:merchantId/webhook-endpoints/:id` business logic.
  * The statement carries the merchant-scoped predicate, never `id` alone. A hard
  * delete, not a status flip — `PATCH .../status: 'disabled'` (update.ts) is
- * the separate tool for "pause without losing history." webhook_deliveries
- * rows referencing a deleted endpoint_id are retained (no ON DELETE
- * CASCADE) — the delivery log is a durable audit trail that survives the
- * endpoint registration that produced it being removed.
+ * the separate tool for "pause without losing history."
+ *
+ * The delivery log is an audit trail, and webhook_deliveries.endpoint_id is
+ * NOT NULL with no ON DELETE rule (migration 0022), so an endpoint that has
+ * any deliveries cannot be deleted: that used to surface as a database error
+ * (500). It is now a 409 telling the caller to disable it instead.
  */
-// FH: docblock says deliveries are kept and there's no ON DELETE CASCADE — then the FK blocks the DELETE and we 500?
-// YA: FK is ON DELETE SET NULL (0029). fine
 export async function deleteWebhookEndpoint(
   pool: Pool,
   input: { merchantId: string; id: string },
 ): Promise<DeleteWebhookEndpointResult> {
-  const result = await pool.query<{ id: string }>(
-    `DELETE FROM webhook_endpoints WHERE id = $1 AND merchant_id = $2 RETURNING id`,
-    [input.id, input.merchantId],
-  );
-  return result.rows[0] ? "deleted" : "not_found";
+  try {
+    const result = await pool.query<{ id: string }>(
+      `DELETE FROM webhook_endpoints WHERE id = $1 AND merchant_id = $2 RETURNING id`,
+      [input.id, input.merchantId],
+    );
+    return result.rows[0] ? "deleted" : "not_found";
+  } catch (err) {
+    if ((err as { code?: string }).code === "23503") {
+      throw new ConflictError("endpoint_has_deliveries", "this endpoint has delivery history; disable it instead of deleting it");
+    }
+    throw err;
+  }
 }
