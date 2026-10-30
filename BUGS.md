@@ -585,13 +585,20 @@ Where an existing test asserted wrong behaviour (e.g. a 4.75 BD import expected 
 
 These are real, but fixing them is a business or design decision, or large enough that I would not call it a "smallest change". They are listed so the next person does not have to rediscover them.
 
-- **Credits and manual balance adjustments never reach a payout.** Settlement pays from capture and refund events, so a manual credit changes `merchant_payable` and the cache but is never in a batch.
-- **"Adjust balance" only changes the cache** (ADR-0006), although `ADMIN.md` says it is journaled. A rebuild undoes it. This is a deliberate decision in the ADR, but the admin guide is wrong.
 - **MDR recalculation uses the plain `merchants.mdr_bps`**, while a batch close uses the fee schedule in force on each event's date and the platform volume tier. So recalculating a batch that was closed under a schedule or the tier changes its fee even when nothing was edited. What "current terms" should mean is a finance decision.
-- **The reporting worker consumes the outbox by `id`.** A transaction that commits late with a lower id can be skipped. HANDOVER lists the fix (commit order) as unfinished.
-- **A webhook replay gets a new delivery id.** ARCHITECTURE §5 says `Webhook-Delivery-Id` is stable across retries and replays; receivers that dedupe on it will process a replay twice.
 - **Platform volume tier is read at capture time and again at batch close**, so the two can price one capture differently across the threshold. The threshold change (CHANGELOG 1.9.2) also has no finance sign-off, which HANDOVER requires.
 - **Known upstream dead code** (`apps/api/src/v1/*`, `parsePromotionalDiscountFils`, `recordCaptureMetric`) is not wired in. I left it alone.
-- **`npm audit` reports 8 advisories** (3 high, 5 moderate). `fastify`, `fast-uri` and `source-map-js` could be fixed with `npm audit fix`; `vite`, `react-router` and `sharp` need major-version upgrades. I did not change dependencies without being able to run the whole stack.
-- **The hosted deployment on Dilmune Cloud is not done**; the instructions were not available yet.
-- **Rotate the committed acquirer secret.** It is removed from the files (#26) but still in git history.
+- **Rotate the committed acquirer secret.** It is removed from the files (#26) but still in git history. The live server uses a freshly generated secret.
+- **No real second factor on the hosted demo.** There is no email/SMS provider, so the demo shows the login code on screen (`DEMO_SHOW_OTP_IN_PRODUCTION`, warned at boot). Safeguard: plug a sender into `auth/notifier.ts` and turn the flag off.
+- **One database role for every service, no per-IP rate limiting, plain HTTP** (no domain was provided). Proposed: separate `app`/`migrator`/`readonly` roles, `@fastify/rate-limit` on login/OTP/payment-create, and a domain so Caddy serves HTTPS.
+
+### Resolved later by the team audit (`verify/submission-audit`, Abdu)
+
+These were on this list before; the audit branch fixed them with tests (details in `docs/verification/`):
+
+- Credits and manual balance adjustments never reached a payout → settlement now claims adjustments and carries negative balances as debt with audited payout instructions.
+- "Adjust balance" only changed the cache → the payable cache is ledger-driven and `ledger_entries` is append-only (migration 0083).
+- The reporting worker could skip an outbox event committed late with a lower id → per-event receipts.
+- A webhook replay got a new delivery id → replay keeps its identity; deliveries are leased.
+- `npm audit` advisories → 0 after the Vite 7 / React Router 7 / sharp upgrades.
+- Hosted deployment → live at http://139.59.62.5 (`docs/DEPLOY.md`).

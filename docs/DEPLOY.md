@@ -47,7 +47,7 @@ URLs (with `SITE_ADDRESS=shop.example.com`):
 
 | What | URL |
 |---|---|
-| Merchant dashboard and hosted checkout | `https://shop.example.com` (checkout links look like `/checkout/<token>`) |
+| Merchant dashboard and hosted checkout | `https://shop.example.com` (checkout links look like `/pay/<token>`) |
 | Admin console | `https://shop.example.com:8443` |
 | Public API | `https://shop.example.com/v1/...` |
 | Health | `https://shop.example.com/healthz`, `/readyz` |
