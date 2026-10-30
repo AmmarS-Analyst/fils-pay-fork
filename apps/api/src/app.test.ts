@@ -276,6 +276,22 @@ test("requesting a new OTP does not give back the used guesses", async () => {
   assert.equal(used.rows[0]!.attempt_count, config.otpMaxAttempts - 1);
 });
 
+test("after the OTP step the session cookie lasts the full session, not the 10-minute pending window", async () => {
+  const password = "correct horse battery staple 1!";
+  const { merchantId, email } = await signup("cookie-life", password);
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { merchantId, email, password } });
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  const verify = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    headers: { cookie },
+    payload: { code: (login.json() as { devOtpCode: string }).devOtpCode },
+  });
+  assert.equal(verify.statusCode, 200, verify.body);
+  const setCookie = String(verify.headers["set-cookie"]);
+  assert.match(setCookie, new RegExp(`Max-Age=${config.sessionTtlHours * 3600}`));
+});
+
 test("otp verify with the wrong code is rejected", async () => {
   const password = "another-real-password-456";
   const { merchantId, email } = await signup("wrongotp", password);

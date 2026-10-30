@@ -171,8 +171,7 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
 
     // Re-set the cookie so its browser-side lifetime matches the now-promoted
     // session's full TTL rather than the short pending window.
-    // YA: why is the cookie set twice (login and verify)? Claude says remove one
-    // FH: the second one re-issues at the full session TTL. the merchant flow should do the same
+    // Re-issued at the full session length (the login cookie only lasts the pending window).
     reply.setCookie(app.config.adminCookieName, rawToken, {
       httpOnly: true,
       path: "/",

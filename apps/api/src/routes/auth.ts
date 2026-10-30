@@ -170,8 +170,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         if (consumed.rowCount !== 1) {
           throw new GoneError("otp_expired");
         }
-        // promoteSession bumps expires_at to 12h server-side; the cookie maxAge doesn't matter because
-        // MK: admin verify re-sets the cookie after this, merchant verify doesnt. related to the 10 min logouts?
+        // promoteSession bumps expires_at to the full session length server-side.
         await promoteSession(client, pending.sessionId, app.config.sessionTtlHours);
         const result = await client.query<{ merchant_id: string; role: "owner" | "finance" | "support" }>(
           `SELECT merchant_id, role FROM merchant_users WHERE id = $1`,
@@ -182,6 +181,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (!merchantUserResult) {
         throw new Error("otp/verify: merchant_users row disappeared mid-transaction");
       }
+
+      // The login cookie only lives for the pending window (10 min); re-issue it
+      // for the real session length, as the admin flow does.
+      reply.setCookie(app.config.cookieName, rawToken, {
+        httpOnly: true,
+        path: "/",
+        sameSite: "lax",
+        secure: app.config.cookieSecure,
+        maxAge: app.config.sessionTtlHours * 3_600,
+      });
 
       reply.code(200).send({
         authenticated: true,
