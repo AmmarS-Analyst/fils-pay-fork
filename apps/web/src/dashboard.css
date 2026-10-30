@@ -308,3 +308,15 @@
   min-width: 1px;
   background: #4a7ebb;
 }
+
+/* money columns: right-aligned with equal-width digits so amounts line up */
+.dash-table th.dash-num,
+.dash-table td.dash-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dash-status-partially_refunded {
+  color: #34495e;
+}
