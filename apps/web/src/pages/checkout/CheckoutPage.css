@@ -70,3 +70,30 @@
   font-size: 0.75rem;
   color: #777;
 }
+
+/* Keep card fields inside the checkout at narrow viewport widths. */
+.checkout-page,
+.checkout-page * {
+  box-sizing: border-box;
+}
+
+.checkout-page {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.checkout-form label,
+.checkout-form input {
+  min-width: 0;
+  width: 100%;
+}
+
+.checkout-form-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.checkout-page dd {
+  margin-inline-start: 0;
+  overflow-wrap: anywhere;
+}

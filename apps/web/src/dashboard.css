@@ -308,3 +308,42 @@
   min-width: 1px;
   background: #4a7ebb;
 }
+
+.dash-shell *,
+.dash-centered * {
+  box-sizing: border-box;
+}
+
+.dash-main,
+.dash-identity {
+  min-width: 0;
+}
+
+.dash-main dd,
+.dash-identity span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .dash-main,
+  .dash-header {
+    padding: 1rem;
+  }
+
+  .dash-table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .dash-form input,
+  .dash-form select {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dash-button,
+  .dash-button-link {
+    min-height: 44px;
+  }
+}

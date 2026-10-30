@@ -226,3 +226,50 @@ button:disabled {
   margin-top: 0.4rem;
   font-weight: 700;
 }
+
+.admin-shell *,
+.admin-centered * {
+  box-sizing: border-box;
+}
+
+.admin-nav {
+  flex-wrap: wrap;
+}
+
+.admin-main,
+.admin-identity {
+  min-width: 0;
+}
+
+.admin-main dd,
+.admin-identity span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .admin-main,
+  .admin-header {
+    padding: 1rem;
+  }
+
+  .admin-form-inline {
+    flex-wrap: wrap;
+  }
+
+  .admin-table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .admin-form input,
+  .admin-form select,
+  .admin-form textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-shell button {
+    min-height: 44px;
+  }
+}
