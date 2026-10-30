@@ -13,8 +13,15 @@ import { pathToFileURL } from "node:url";
 import { Client } from "pg";
 import { formatBhd, toFils } from "@filspay/money";
 
+/** Asia/Bahrain is UTC+3 with no DST. */
+const BAHRAIN_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+/** The Asia/Bahrain calendar month as UTC instants (batches use the Bahrain day, not UTC). */
 export function monthBounds(year: number, month: number): { start: Date; end: Date } {
-  return { start: new Date(Date.UTC(year, month - 1, 1)), end: new Date(Date.UTC(year, month, 1)) };
+  return {
+    start: new Date(Date.UTC(year, month - 1, 1) - BAHRAIN_OFFSET_MS),
+    end: new Date(Date.UTC(year, month, 1) - BAHRAIN_OFFSET_MS),
+  };
 }
 
 export interface ResidueRow {
@@ -68,16 +75,26 @@ function groupByMerchant(rows: ResidueRow[]): MerchantResidue[] {
   return [...byMerchant.values()];
 }
 
-// am: re-running is safe, entry_group_id dedupes it
-async function postResidueCorrection(client: Client, merchant: MerchantResidue, now: Date): Promise<void> {
+/**
+ * Posts one merchant's March residue per ADR-0002 (credit card_scheme_clearing,
+ * debit scheme_rounding_residue) dated at the end of March. Skips merchants
+ * already posted, so a re-run doesn't double it.
+ */
+async function postResidueCorrection(client: Client, merchant: MerchantResidue, periodEnd: Date): Promise<void> {
   if (merchant.residueFils <= 0) return;
-  const entryGroupId = randomUUID();
   const description = "March 2026 scheme rounding residue sweep — manual recon per finance";
+  const already = await client.query(
+    `SELECT 1 FROM ledger_entries WHERE merchant_id = $1 AND description = $2 LIMIT 1`,
+    [merchant.merchantId, description],
+  );
+  if (already.rowCount) return;
+  const entryGroupId = randomUUID();
+  const effectiveAt = new Date(periodEnd.getTime() - 1);
   await client.query(
     `INSERT INTO ledger_entries (entry_group_id, merchant_id, account_id, direction, amount_fils, occurred_at, description)
-     VALUES ($1, $2, 'merchant_payable', 'debit', $3, $4, $5),
-            ($1, $2, 'scheme_rounding_residue', 'credit', $3, $4, $5)`,
-    [entryGroupId, merchant.merchantId, merchant.residueFils, now.toISOString(), description],
+     VALUES ($1, $2, 'card_scheme_clearing', 'credit', $3, $4, $5),
+            ($1, $2, 'scheme_rounding_residue', 'debit', $3, $4, $5)`,
+    [entryGroupId, merchant.merchantId, merchant.residueFils, effectiveAt.toISOString(), description],
   );
 }
 
@@ -106,7 +123,7 @@ async function main(): Promise<void> {
     await client.query("BEGIN");
     try {
       for (const merchant of merchantResidues) {
-        await postResidueCorrection(client, merchant, now);
+        await postResidueCorrection(client, merchant, end);
         console.log(
           `merchant ${merchant.merchantId}: ${merchant.lineCount} line(s), residue ${formatBhd(toFils(merchant.residueFils))} BD (${merchant.residueFils} fils)`,
         );
