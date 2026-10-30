@@ -1071,7 +1071,44 @@ test("webhook batch replay accepts an explicit statuses filter, and rejects bad 
 
 // ------------------------------------------------------ impersonation
 
-// covers support only. finance/super_admin impersonation not tested — MK
+for (const role of ["finance", "super_admin"] as const) {
+  test(`a ${role} impersonation grant is view-only too (was mapped to a writable merchant role)`, async () => {
+    const admin = await signedInAdmin(role, `imp-${role}`);
+    const { merchantId } = await createMerchant(`imp-${role}`);
+    const startRes = await app.inject({
+      method: "POST",
+      url: `/v1/admin/merchants/${merchantId}/impersonate`,
+      headers: { cookie: admin.cookie },
+    });
+    assert.equal(startRes.statusCode, 201, startRes.body);
+    const impCookie = parseCookie(startRes.headers["set-cookie"], config.impersonationCookieName);
+
+    const createLinkRes = await app.inject({
+      method: "POST",
+      url: `/v1/merchants/${merchantId}/payment-links`,
+      headers: { cookie: impCookie },
+      payload: { amountFils: 1000, expiresAt: new Date(Date.now() + 3_600_000).toISOString() },
+    });
+    assert.equal(createLinkRes.statusCode, 403, createLinkRes.body);
+  });
+}
+
+test("a disabled admin's impersonation grant stops working immediately", async () => {
+  const admin = await signedInAdmin("support", "imp-disabled");
+  const { merchantId } = await createMerchant("imp-disabled");
+  const startRes = await app.inject({
+    method: "POST",
+    url: `/v1/admin/merchants/${merchantId}/impersonate`,
+    headers: { cookie: admin.cookie },
+  });
+  assert.equal(startRes.statusCode, 201, startRes.body);
+  const impCookie = parseCookie(startRes.headers["set-cookie"], config.impersonationCookieName);
+
+  await pool.query(`UPDATE admin_users SET status = 'disabled' WHERE id = $1`, [admin.id]);
+  const readRes = await app.inject({ method: "GET", url: "/v1/transactions", headers: { cookie: impCookie } });
+  assert.equal(readRes.statusCode, 401, readRes.body);
+});
+
 test("a support impersonation grant reads merchant data but cannot perform owner/finance writes, and dies when ended", async () => {
   // A support operator is the least-privileged admin; a grant expresses that
   // standing in the merchant plane, so owner/finance-gated writes stay closed.
