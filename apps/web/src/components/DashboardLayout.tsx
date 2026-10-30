@@ -61,6 +61,7 @@ export function DashboardLayout() {
 
       <main className="dash-main">
         <Outlet />
+        <p className="dash-muted">Times are shown in Bahrain time (UTC+3).</p>
       </main>
     </div>
   );
